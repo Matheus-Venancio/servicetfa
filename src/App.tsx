@@ -9,6 +9,7 @@ import LoginPage from "@/pages/LoginPage";
 import DashboardPage from "@/pages/DashboardPage";
 import ConversasPage from "@/pages/ConversasPage";
 import AtendentesPage from "@/pages/AtendentesPage";
+import AtendenteConversasPage from "@/pages/AtendenteConversasPage";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -42,6 +43,7 @@ const App = () => (
           <Route path="/gestor/conversas" element={<ConversasPage role="GESTOR" />} />
           <Route path="/gestor/conversas/:id" element={<ConversasPage role="GESTOR" />} />
           <Route path="/gestor/atendentes" element={<AtendentesPage />} />
+          <Route path="/gestor/atendentes/:atendenteId/conversas" element={<AtendenteConversasPage />} />
           {/* </Route> */}
 
           {/* Atendente routes */}
