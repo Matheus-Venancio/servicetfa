@@ -31,30 +31,30 @@ const App = () => (
           <Route path="/" element={<Navigate to="/login" replace />} />
 
           {/* Gestor routes */}
-          <Route
+          {/* <Route
             element={
               <ProtectedRoute allowedRoles={['GESTOR']}>
                 <AppShell />
               </ProtectedRoute>
             }
-          >
-            <Route path="/gestor/dashboard" element={<DashboardPage />} />
-            <Route path="/gestor/conversas" element={<ConversasPage role="GESTOR" />} />
-            <Route path="/gestor/conversas/:id" element={<ConversasPage role="GESTOR" />} />
-            <Route path="/gestor/atendentes" element={<AtendentesPage />} />
-          </Route>
+          > */}
+          <Route path="/gestor/dashboard" element={<DashboardPage />} />
+          <Route path="/gestor/conversas" element={<ConversasPage role="GESTOR" />} />
+          <Route path="/gestor/conversas/:id" element={<ConversasPage role="GESTOR" />} />
+          <Route path="/gestor/atendentes" element={<AtendentesPage />} />
+          {/* </Route> */}
 
           {/* Atendente routes */}
-          <Route
+          {/* <Route
             element={
               <ProtectedRoute allowedRoles={['ATENDENTE']}>
                 <AppShell />
               </ProtectedRoute>
             }
-          >
-            <Route path="/atendente/conversas" element={<ConversasPage role="ATENDENTE" />} />
-            <Route path="/atendente/conversas/:id" element={<ConversasPage role="ATENDENTE" />} />
-          </Route>
+          > */}
+          <Route path="/atendente/conversas" element={<ConversasPage role="ATENDENTE" />} />
+          <Route path="/atendente/conversas/:id" element={<ConversasPage role="ATENDENTE" />} />
+          {/* </Route> */}
 
           <Route path="*" element={<NotFound />} />
         </Routes>
