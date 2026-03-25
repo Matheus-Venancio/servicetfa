@@ -14,7 +14,7 @@ import {
   Search, Send, Paperclip, Smile, Zap, MessageCircle, ArrowRightLeft, Shield, UserCheck, Phone, Mail, MapPin, Calendar, DollarSign, UsersIcon,
 } from 'lucide-react';
 
-export default function ConversasPage({ role }: { role: 'GESTOR' | 'ATENDENTE' }) {
+export default function ConversasPage({ role, filterByAtendente }: { role: 'GESTOR' | 'ATENDENTE'; filterByAtendente?: string }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
@@ -32,8 +32,10 @@ export default function ConversasPage({ role }: { role: 'GESTOR' | 'ATENDENTE' }
   // Filter leads based on role
   const filteredLeads = useMemo(() => {
     let result = leads;
-    if (role === 'ATENDENTE' && user) {
-      result = result.filter((l) => l.atendenteNome === user.nome || l.atendenteNome === null);
+    if (filterByAtendente) {
+      result = result.filter((l) => l.atendenteNome === filterByAtendente);
+    } else if (role === 'ATENDENTE' && user) {
+      result = result.filter((l) => l.atendenteNome === user.nome);
     }
     if (filtroSidebar === 'nao_atribuidas') result = result.filter((l) => !l.atendenteNome);
     if (filtroSidebar === 'suas') result = result.filter((l) => l.atendenteNome === user?.nome);
