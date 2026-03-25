@@ -10,6 +10,7 @@ import DashboardPage from "@/pages/DashboardPage";
 import ConversasPage from "@/pages/ConversasPage";
 import AtendentesPage from "@/pages/AtendentesPage";
 import AtendenteConversasPage from "@/pages/AtendenteConversasPage";
+import WhatsAppConnectPage from "@/pages/WhatsAppConnectPage";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -44,6 +45,7 @@ const App = () => (
           <Route path="/gestor/conversas/:id" element={<ConversasPage role="GESTOR" />} />
           <Route path="/gestor/atendentes" element={<AtendentesPage />} />
           <Route path="/gestor/atendentes/:atendenteId/conversas" element={<AtendenteConversasPage />} />
+          <Route path="/gestor/whatsapp" element={<WhatsAppConnectPage />} />
           {/* </Route> */}
 
           {/* Atendente routes */}
@@ -56,6 +58,7 @@ const App = () => (
           > */}
           <Route path="/atendente/conversas" element={<ConversasPage role="ATENDENTE" />} />
           <Route path="/atendente/conversas/:id" element={<ConversasPage role="ATENDENTE" />} />
+          <Route path="/atendente/whatsapp" element={<WhatsAppConnectPage />} />
           {/* </Route> */}
 
           <Route path="*" element={<NotFound />} />
