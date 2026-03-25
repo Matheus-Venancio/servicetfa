@@ -14,7 +14,154 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      conversations: {
+        Row: {
+          atendente_id: string | null
+          atendente_nome: string | null
+          channel_id: string | null
+          contact_avatar_url: string | null
+          contact_name: string | null
+          contact_phone: string
+          created_at: string
+          id: string
+          last_message: string | null
+          last_message_at: string | null
+          remote_jid: string
+          status: string
+          tags: string[] | null
+          unread_count: number
+          updated_at: string
+        }
+        Insert: {
+          atendente_id?: string | null
+          atendente_nome?: string | null
+          channel_id?: string | null
+          contact_avatar_url?: string | null
+          contact_name?: string | null
+          contact_phone: string
+          created_at?: string
+          id?: string
+          last_message?: string | null
+          last_message_at?: string | null
+          remote_jid: string
+          status?: string
+          tags?: string[] | null
+          unread_count?: number
+          updated_at?: string
+        }
+        Update: {
+          atendente_id?: string | null
+          atendente_nome?: string | null
+          channel_id?: string | null
+          contact_avatar_url?: string | null
+          contact_name?: string | null
+          contact_phone?: string
+          created_at?: string
+          id?: string
+          last_message?: string | null
+          last_message_at?: string | null
+          remote_jid?: string
+          status?: string
+          tags?: string[] | null
+          unread_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversations_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          content: string
+          conversation_id: string
+          created_at: string
+          id: string
+          media_type: string | null
+          media_url: string | null
+          origin: string
+          sender_name: string | null
+          sender_phone: string | null
+          whatsapp_message_id: string | null
+        }
+        Insert: {
+          content: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          media_type?: string | null
+          media_url?: string | null
+          origin: string
+          sender_name?: string | null
+          sender_phone?: string | null
+          whatsapp_message_id?: string | null
+        }
+        Update: {
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          media_type?: string | null
+          media_url?: string | null
+          origin?: string
+          sender_name?: string | null
+          sender_phone?: string | null
+          whatsapp_message_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whatsapp_channels: {
+        Row: {
+          api_key: string | null
+          atendente_id: string
+          atendente_nome: string
+          created_at: string
+          evolution_api_url: string | null
+          id: string
+          instance_name: string
+          phone_number: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          api_key?: string | null
+          atendente_id: string
+          atendente_nome: string
+          created_at?: string
+          evolution_api_url?: string | null
+          id?: string
+          instance_name: string
+          phone_number?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          api_key?: string | null
+          atendente_id?: string
+          atendente_nome?: string
+          created_at?: string
+          evolution_api_url?: string | null
+          id?: string
+          instance_name?: string
+          phone_number?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
