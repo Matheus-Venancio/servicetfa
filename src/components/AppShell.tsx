@@ -1,6 +1,6 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
-import { Home, MessageCircle, Users, BarChart3, Settings, LogOut, Plane } from 'lucide-react';
+import { Home, MessageCircle, Users, BarChart3, Settings, LogOut, Plane, Smartphone } from 'lucide-react';
 import { AvatarInicial } from '@/components/AvatarInicial';
 import { StatusDot } from '@/components/StatusDot';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -9,12 +9,14 @@ const NAV_GESTOR = [
   { icon: Home, label: 'Dashboard', path: '/gestor/dashboard' },
   { icon: MessageCircle, label: 'Conversas', path: '/gestor/conversas' },
   { icon: Users, label: 'Atendentes', path: '/gestor/atendentes' },
+  { icon: Smartphone, label: 'WhatsApp', path: '/gestor/whatsapp' },
   { icon: BarChart3, label: 'Relatórios', path: '#' },
   { icon: Settings, label: 'Configurações', path: '#' },
 ];
 
 const NAV_ATENDENTE = [
   { icon: MessageCircle, label: 'Conversas', path: '/atendente/conversas' },
+  { icon: Smartphone, label: 'WhatsApp', path: '/atendente/whatsapp' },
   { icon: Settings, label: 'Configurações', path: '#' },
 ];
 
