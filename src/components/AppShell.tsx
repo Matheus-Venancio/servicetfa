@@ -1,9 +1,10 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
-import { Home, MessageCircle, Users, BarChart3, Settings, LogOut, Plane, Smartphone } from 'lucide-react';
+import { Home, MessageCircle, Users, BarChart3, Settings, LogOut, Smartphone } from 'lucide-react';
 import { AvatarInicial } from '@/components/AvatarInicial';
 import { StatusDot } from '@/components/StatusDot';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import logoTfa from '@/assets/logo-tfa.png';
 
 const NAV_GESTOR = [
   { icon: Home, label: 'Dashboard', path: '/gestor/dashboard' },
@@ -36,9 +37,9 @@ export default function AppShell() {
   return (
     <div className="flex h-screen w-full overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-16 bg-sidebar flex flex-col items-center py-4 shrink-0">
-        <div className="h-10 w-10 rounded-lg bg-primary flex items-center justify-center mb-6">
-          <Plane className="h-5 w-5 text-primary-foreground" />
+      <aside className="w-16 bg-gradient-sidebar flex flex-col items-center py-4 shrink-0">
+        <div className="mb-6">
+          <img src={logoTfa} alt="TFA Viagens" className="h-10 w-10 rounded-lg object-contain" />
         </div>
 
         <nav className="flex-1 flex flex-col items-center gap-1">
