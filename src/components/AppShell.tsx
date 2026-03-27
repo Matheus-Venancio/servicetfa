@@ -37,27 +37,14 @@ interface NavSection {
 
 const NAV_GESTOR: NavSection[] = [
   {
-    title: 'Principal',
-    items: [
-      { icon: LayoutDashboard, label: 'Dashboard', path: '/gestor/dashboard' },
-      { icon: MessageCircle, label: 'Conversas', path: '/gestor/conversas', badge: 3 },
-    ],
-  },
-  {
     title: 'Gestão',
     items: [
+      { icon: LayoutDashboard, label: 'Dashboard', path: '/gestor/dashboard' },
       { icon: Users, label: 'Atendentes', path: '/gestor/atendentes' },
       { icon: Smartphone, label: 'WhatsApp', path: '/gestor/whatsapp' },
+      { icon: Smartphone, label: 'Documentos', path: '#', disabled: true },
+      { icon: MessageCircle, label: 'Clientes', path: '#', disabled: true },
       { icon: TrendingUp, label: 'Relatórios', path: '#', disabled: true },
-    ],
-  },
-  {
-    title: 'Sistema',
-    items: [
-      { icon: Bell, label: 'Notificações', path: '#', disabled: true },
-      { icon: Zap, label: 'Automações', path: '#', disabled: true },
-      { icon: BarChart3, label: 'Métricas', path: '#', disabled: true },
-      { icon: Settings, label: 'Configurações', path: '#', disabled: true },
     ],
   },
 ];

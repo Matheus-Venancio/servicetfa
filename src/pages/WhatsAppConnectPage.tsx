@@ -30,6 +30,7 @@ export default function WhatsAppConnectPage() {
   const [showForm, setShowForm] = useState(false);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [connectingInstance, setConnectingInstance] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
 
   // Form state
   const [instanceName, setInstanceName] = useState('');
@@ -37,6 +38,7 @@ export default function WhatsAppConnectPage() {
   const [apiKey, setApiKey] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
 
   const loadChannels = async () => {
     setLoading(true);
@@ -75,17 +77,21 @@ export default function WhatsAppConnectPage() {
 
       if (error) throw error;
 
+      // Debug: log full response to identify QR code field
+      console.log('[WhatsApp] create_instance response:', JSON.stringify(data));
+
+      // Handle QR code — must be done BEFORE resetting form state
       if (data?.qrcode) {
         setQrCode(data.qrcode);
         setConnectingInstance(instanceName.trim());
-      }
-
-      if (data?.error_evolution) {
-        toast.warning(data.error_evolution);
+        toast.success('Canal criado! Escaneie o QR Code para conectar.');
+      } else if (data?.error_evolution) {
+        toast.warning(`Canal criado sem QR: ${data.error_evolution}`);
       } else {
         toast.success('Canal criado com sucesso!');
       }
 
+      // Reset form
       setShowForm(false);
       setInstanceName('');
       setEvolutionUrl('');
@@ -93,6 +99,7 @@ export default function WhatsAppConnectPage() {
       setPhoneNumber('');
       await loadChannels();
     } catch (err: any) {
+      console.error('[WhatsApp] create_instance error:', err);
       toast.error(err.message || 'Erro ao criar canal');
     }
     setSubmitting(false);
@@ -100,13 +107,27 @@ export default function WhatsAppConnectPage() {
 
   const handleGetQRCode = async (channel: Channel) => {
     setConnectingInstance(channel.instance_name);
-    const { data } = await supabase.functions.invoke('whatsapp-connect', {
-      body: { action: 'get_qrcode', instanceName: channel.instance_name },
-    });
-    if (data?.qrcode) {
-      setQrCode(data.qrcode);
-    } else {
-      toast.error('Não foi possível gerar o QR Code. Verifique a configuração da Evolution API.');
+    const loadingToast = toast.loading('Buscando QR Code...');
+    try {
+      const { data, error } = await supabase.functions.invoke('whatsapp-connect', {
+        body: { action: 'get_qrcode', instanceName: channel.instance_name },
+      });
+      console.log('[WhatsApp] get_qrcode response:', JSON.stringify(data));
+      toast.dismiss(loadingToast);
+      if (error) throw error;
+      if (data?.qrcode) {
+        setQrCode(data.qrcode);
+      } else {
+        toast.error(
+          'QR Code não recebido. Verifique a URL e chave da Evolution API, ou se a instância já está conectada.'
+        );
+        setConnectingInstance(null);
+      }
+    } catch (err: any) {
+      toast.dismiss(loadingToast);
+      console.error('[WhatsApp] get_qrcode error:', err);
+      toast.error('Erro ao buscar QR Code: ' + (err.message || 'verifique as configurações.'));
+      setConnectingInstance(null);
     }
   };
 

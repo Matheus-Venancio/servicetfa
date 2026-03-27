@@ -5,6 +5,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Evolution API returns QR in different fields depending on version
+// v1: { base64: '...' } | v2: { qrcode: { base64: '...' } } | some: { qrcode: { code: '...' } }
+function extractQrCode(data: Record<string, unknown>): string | null {
+  if (typeof data?.base64 === 'string') return data.base64
+  const qr = data?.qrcode as Record<string, unknown> | undefined
+  if (typeof qr?.base64 === 'string') return qr.base64
+  if (typeof qr?.code === 'string') return qr.code
+  return null
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -68,20 +78,24 @@ Deno.serve(async (req) => {
             })
             const connectData = await connectRes.json()
 
+            const qrcode = extractQrCode(connectData)
+            console.log('connect fallback response keys:', Object.keys(connectData), 'qrcode found:', !!qrcode)
             return new Response(JSON.stringify({ 
               ok: true, 
               channel, 
-              qrcode: connectData.base64 || connectData.qrcode?.base64,
+              qrcode,
               status: connectData.instance?.state || 'connecting'
             }), { 
               headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
             })
           }
 
+          const qrcode = extractQrCode(createData)
+          console.log('create_instance response keys:', Object.keys(createData), 'qrcode found:', !!qrcode)
           return new Response(JSON.stringify({ 
             ok: true, 
             channel, 
-            qrcode: createData.qrcode?.base64,
+            qrcode,
             status: 'connecting'
           }), { 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -165,9 +179,11 @@ Deno.serve(async (req) => {
       })
       const connectData = await connectRes.json()
 
+      const qrcode = extractQrCode(connectData)
+      console.log('get_qrcode response keys:', Object.keys(connectData), 'qrcode found:', !!qrcode)
       return new Response(JSON.stringify({ 
         ok: true, 
-        qrcode: connectData.base64 || connectData.qrcode?.base64,
+        qrcode,
         status: connectData.instance?.state || 'connecting'
       }), { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
