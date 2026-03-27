@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Eye, EyeOff, Plane } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
+import logoTfa from '@/assets/logo-tfa.png';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -29,15 +30,30 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface-secondary">
-      <div className="w-full max-w-sm">
-        <div className="bg-card rounded-xl shadow-lg border border-border p-8">
-          <div className="flex flex-col items-center mb-8">
-            <div className="h-14 w-14 rounded-xl bg-primary flex items-center justify-center mb-3">
-              <Plane className="h-7 w-7 text-primary-foreground" />
-            </div>
+    <div className="min-h-screen flex bg-gradient-tfa">
+      {/* Left panel - branding */}
+      <div className="hidden lg:flex lg:w-1/2 flex-col items-center justify-center p-12 text-primary-foreground relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_50%,hsl(184_60%_35%/0.4),transparent_60%)]" />
+        <div className="relative z-10 text-center">
+          <img src={logoTfa} alt="TFA Viagens" className="h-28 w-28 mx-auto mb-8 drop-shadow-lg" width={112} height={112} />
+          <h2 className="text-3xl font-bold mb-3">TFA Viagens</h2>
+          <p className="text-primary-foreground/80 text-lg max-w-md">
+            Sistema de Atendimento inteligente para sua agência de viagens
+          </p>
+        </div>
+      </div>
+
+      {/* Right panel - login form */}
+      <div className="flex-1 flex items-center justify-center p-6 bg-background rounded-l-3xl lg:rounded-l-[2rem] shadow-2xl">
+        <div className="w-full max-w-sm">
+          <div className="flex flex-col items-center mb-8 lg:hidden">
+            <img src={logoTfa} alt="TFA Viagens" className="h-16 w-16 mb-3" width={64} height={64} />
             <h1 className="text-xl font-bold text-foreground">TFA Viagens</h1>
-            <p className="text-sm text-muted-foreground">Sistema de Atendimento</p>
+          </div>
+
+          <div className="lg:block hidden mb-8">
+            <h1 className="text-2xl font-bold text-foreground">Bem-vindo de volta</h1>
+            <p className="text-sm text-muted-foreground mt-1">Acesse sua conta para continuar</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
