@@ -32,34 +32,15 @@ const App = () => (
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<Navigate to="/login" replace />} />
 
-          {/* Gestor routes */}
-          {/* <Route
-            element={
-              <ProtectedRoute allowedRoles={['GESTOR']}>
-                <AppShell />
-              </ProtectedRoute>
-            }
-          > */}
-          <Route path="/gestor/dashboard" element={<DashboardPage />} />
-          <Route path="/gestor/conversas" element={<ConversasPage role="GESTOR" />} />
-          <Route path="/gestor/conversas/:id" element={<ConversasPage role="GESTOR" />} />
-          <Route path="/gestor/atendentes" element={<AtendentesPage />} />
-          <Route path="/gestor/atendentes/:atendenteId/conversas" element={<AtendenteConversasPage />} />
-          <Route path="/gestor/whatsapp" element={<WhatsAppConnectPage />} />
-          {/* </Route> */}
-
-          {/* Atendente routes */}
-          {/* <Route
-            element={
-              <ProtectedRoute allowedRoles={['ATENDENTE']}>
-                <AppShell />
-              </ProtectedRoute>
-            }
-          > */}
-          <Route path="/atendente/conversas" element={<ConversasPage role="ATENDENTE" />} />
-          <Route path="/atendente/conversas/:id" element={<ConversasPage role="ATENDENTE" />} />
-          <Route path="/atendente/whatsapp" element={<WhatsAppConnectPage />} />
-          {/* </Route> */}
+          {/* Gestor routes — AppShell as layout */}
+          <Route element={<AppShell />}>
+            <Route path="/gestor/dashboard" element={<DashboardPage />} />
+            <Route path="/gestor/conversas" element={<ConversasPage role="GESTOR" />} />
+            <Route path="/gestor/conversas/:id" element={<ConversasPage role="GESTOR" />} />
+            <Route path="/gestor/atendentes" element={<AtendentesPage />} />
+            <Route path="/gestor/atendentes/:atendenteId/conversas" element={<AtendenteConversasPage />} />
+            <Route path="/gestor/whatsapp" element={<WhatsAppConnectPage />} />
+          </Route>
 
           <Route path="*" element={<NotFound />} />
         </Routes>
