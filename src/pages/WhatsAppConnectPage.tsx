@@ -5,10 +5,10 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { StatusDot } from '@/components/StatusDot';
 import { toast } from 'sonner';
 import {
-  Smartphone, Wifi, WifiOff, QrCode, Plus, Trash2, RefreshCw, CheckCircle2, AlertCircle, Loader2, Link2,
+  Smartphone, Wifi, WifiOff, QrCode, Plus, Trash2, RefreshCw,
+  CheckCircle2, AlertCircle, Loader2, Link2,
 } from 'lucide-react';
 
 interface Channel {
@@ -23,14 +23,37 @@ interface Channel {
   created_at: string;
 }
 
+// ─── Helper: extrai string base64 independente do formato retornado ──────────
+// A Evolution API pode retornar de 3 formas diferentes:
+//   1. { base64: "data:image/png;base64,iVBOR..." }  ← já tem prefixo
+//   2. { base64: "iVBOR..." }                         ← só o base64 puro
+//   3. { qrcode: { base64: "..." } }                  ← aninhado (create)
+// Esta função normaliza qualquer um desses casos para uma data URL válida.
+function extrairBase64QR(data: any): string | null {
+  // Tenta os caminhos mais comuns da Evolution API
+  const raw: string | undefined =
+    data?.qrcode?.base64 ??   // create_instance: { qrcode: { base64 } }
+    data?.qrcode?.code ??     // variante: { qrcode: { code } }
+    data?.base64 ??           // connect: { base64 }
+    data?.qrcode ??           // fallback: { qrcode: "string" }
+    data?.code;               // variante: { code }
+
+  if (!raw || typeof raw !== 'string') return null;
+
+  // Normaliza: garante que tem o prefixo data URL uma única vez
+  if (raw.startsWith('data:image')) return raw;
+  return `data:image/png;base64,${raw}`;
+}
+
 export default function WhatsAppConnectPage() {
   const user = useAuthStore((s) => s.user);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+
+  // qrCode guarda sempre uma data URL válida ou null
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [connectingInstance, setConnectingInstance] = useState<string | null>(null);
-  const [debugInfo, setDebugInfo] = useState<string | null>(null);
 
   // Form state
   const [instanceName, setInstanceName] = useState('');
@@ -38,7 +61,6 @@ export default function WhatsAppConnectPage() {
   const [apiKey, setApiKey] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [showDebug, setShowDebug] = useState(false);
 
   const loadChannels = async () => {
     setLoading(true);
@@ -46,9 +68,10 @@ export default function WhatsAppConnectPage() {
       body: { action: 'list_channels' },
     });
     if (data?.channels) {
-      const filtered = user?.papel === 'GESTOR'
-        ? data.channels
-        : data.channels.filter((c: Channel) => c.atendente_id === user?.id);
+      const filtered =
+        user?.papel === 'GESTOR'
+          ? data.channels
+          : data.channels.filter((c: Channel) => c.atendente_id === user?.id);
       setChannels(filtered);
     }
     setLoading(false);
@@ -77,17 +100,22 @@ export default function WhatsAppConnectPage() {
 
       if (error) throw error;
 
-      // Debug: log full response to identify QR code field
-      console.log('[WhatsApp] create_instance response:', JSON.stringify(data));
+      // Log completo para diagnóstico — remova após confirmar funcionando
+      console.log('[WhatsApp] create_instance full response:', JSON.stringify(data, null, 2));
 
-      // Handle QR code — must be done BEFORE resetting form state
-      if (data?.qrcode) {
-        setQrCode(data.qrcode);
+      // Extrai o QR de forma segura, independente da estrutura retornada
+      const qrDataUrl = extrairBase64QR(data);
+
+      if (qrDataUrl) {
+        setQrCode(qrDataUrl);
         setConnectingInstance(instanceName.trim());
         toast.success('Canal criado! Escaneie o QR Code para conectar.');
       } else if (data?.error_evolution) {
         toast.warning(`Canal criado sem QR: ${data.error_evolution}`);
       } else {
+        // QR não veio no create — tenta buscar via connect
+        console.warn('[WhatsApp] QR não veio no create, tentando /connect...');
+        await handleGetQRCode({ instance_name: instanceName.trim() } as Channel, true);
         toast.success('Canal criado com sucesso!');
       }
 
@@ -105,28 +133,41 @@ export default function WhatsAppConnectPage() {
     setSubmitting(false);
   };
 
-  const handleGetQRCode = async (channel: Channel) => {
+  // silentMode = true quando chamado internamente após create (sem toast de loading)
+  const handleGetQRCode = async (channel: Channel, silentMode = false) => {
     setConnectingInstance(channel.instance_name);
-    const loadingToast = toast.loading('Buscando QR Code...');
+    const loadingToast = silentMode ? null : toast.loading('Buscando QR Code...');
+
     try {
       const { data, error } = await supabase.functions.invoke('whatsapp-connect', {
         body: { action: 'get_qrcode', instanceName: channel.instance_name },
       });
-      console.log('[WhatsApp] get_qrcode response:', JSON.stringify(data));
-      toast.dismiss(loadingToast);
+
+      // Log completo para diagnóstico
+      console.log('[WhatsApp] get_qrcode full response:', JSON.stringify(data, null, 2));
+
+      if (loadingToast) toast.dismiss(loadingToast);
       if (error) throw error;
-      if (data?.qrcode) {
-        setQrCode(data.qrcode);
+
+      // Extrai QR com o mesmo helper normalizado
+      const qrDataUrl = extrairBase64QR(data);
+
+      if (qrDataUrl) {
+        setQrCode(qrDataUrl);
       } else {
-        toast.error(
-          'QR Code não recebido. Verifique a URL e chave da Evolution API, ou se a instância já está conectada.'
-        );
+        if (!silentMode) {
+          toast.error(
+            'QR Code não recebido. Verifique a URL e chave da Evolution API, ou se a instância já está conectada.'
+          );
+        }
         setConnectingInstance(null);
       }
     } catch (err: any) {
-      toast.dismiss(loadingToast);
+      if (loadingToast) toast.dismiss(loadingToast);
       console.error('[WhatsApp] get_qrcode error:', err);
-      toast.error('Erro ao buscar QR Code: ' + (err.message || 'verifique as configurações.'));
+      if (!silentMode) {
+        toast.error('Erro ao buscar QR Code: ' + (err.message || 'verifique as configurações.'));
+      }
       setConnectingInstance(null);
     }
   };
@@ -136,7 +177,9 @@ export default function WhatsAppConnectPage() {
       body: { action: 'check_status', instanceName: channel.instance_name },
     });
     if (data?.channel) {
-      setChannels((prev) => prev.map((c) => c.id === channel.id ? { ...c, status: data.channel.status } : c));
+      setChannels((prev) =>
+        prev.map((c) => (c.id === channel.id ? { ...c, status: data.channel.status } : c))
+      );
       toast.success(`Status: ${data.channel.status}`);
     }
   };
@@ -152,23 +195,24 @@ export default function WhatsAppConnectPage() {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'connected': return <CheckCircle2 className="h-5 w-5 text-success" />;
+      case 'connected':  return <CheckCircle2 className="h-5 w-5 text-success" />;
       case 'connecting': return <Loader2 className="h-5 w-5 text-warning animate-spin" />;
-      default: return <WifiOff className="h-5 w-5 text-destructive" />;
+      default:           return <WifiOff className="h-5 w-5 text-destructive" />;
     }
   };
 
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case 'connected': return 'Conectado';
+      case 'connected':  return 'Conectado';
       case 'connecting': return 'Conectando...';
-      default: return 'Desconectado';
+      default:           return 'Desconectado';
     }
   };
 
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="max-w-4xl mx-auto">
+
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
@@ -205,25 +249,52 @@ export default function WhatsAppConnectPage() {
 
         {/* QR Code modal */}
         {qrCode && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setQrCode(null); setConnectingInstance(null); }}>
-            <Card className="p-8 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+            onClick={() => { setQrCode(null); setConnectingInstance(null); }}
+          >
+            <Card
+              className="p-8 max-w-md w-full mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="text-center">
                 <QrCode className="h-8 w-8 text-primary mx-auto mb-3" />
                 <h3 className="text-lg font-semibold text-foreground mb-1">Escaneie o QR Code</h3>
                 <p className="text-sm text-muted-foreground mb-6">
                   Abra o WhatsApp no celular → Menu → Dispositivos conectados → Conectar dispositivo
                 </p>
+
+                {/* ✅ CORRIGIDO: src usa qrCode direto (já é uma data URL completa) */}
                 <div className="bg-white p-4 rounded-xl inline-block mb-4">
-                  <img src={`data:image/png;base64,${qrCode}`} alt="QR Code WhatsApp" className="w-64 h-64" />
+                  <img
+                    src={qrCode}
+                    alt="QR Code WhatsApp"
+                    className="w-64 h-64"
+                    onError={(e) => {
+                      console.error('[WhatsApp] Falha ao renderizar QR. src:', qrCode?.slice(0, 80));
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
                 </div>
+
                 <p className="text-xs text-muted-foreground">
                   Instância: <span className="font-mono">{connectingInstance}</span>
                 </p>
+
                 <div className="flex gap-2 mt-4 justify-center">
-                  <Button variant="outline" onClick={() => { setQrCode(null); setConnectingInstance(null); }}>
+                  <Button
+                    variant="outline"
+                    onClick={() => { setQrCode(null); setConnectingInstance(null); }}
+                  >
                     Fechar
                   </Button>
-                  <Button onClick={() => { loadChannels(); setQrCode(null); setConnectingInstance(null); }}>
+                  <Button
+                    onClick={() => {
+                      loadChannels();
+                      setQrCode(null);
+                      setConnectingInstance(null);
+                    }}
+                  >
                     <RefreshCw className="h-4 w-4 mr-2" /> Verificar conexão
                   </Button>
                 </div>
@@ -282,7 +353,10 @@ export default function WhatsAppConnectPage() {
             <div className="flex gap-2 mt-4 justify-end">
               <Button variant="outline" onClick={() => setShowForm(false)}>Cancelar</Button>
               <Button onClick={handleCreateInstance} disabled={submitting}>
-                {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wifi className="h-4 w-4 mr-2" />}
+                {submitting
+                  ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  : <Wifi className="h-4 w-4 mr-2" />
+                }
                 Criar e conectar
               </Button>
             </div>
@@ -298,7 +372,9 @@ export default function WhatsAppConnectPage() {
           <Card className="p-16 text-center">
             <Smartphone className="h-16 w-16 text-muted-foreground/30 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-muted-foreground">Nenhum canal conectado</h3>
-            <p className="text-sm text-muted-foreground/70 mt-1">Clique em "Novo Canal" para conectar seu WhatsApp</p>
+            <p className="text-sm text-muted-foreground/70 mt-1">
+              Clique em "Novo Canal" para conectar seu WhatsApp
+            </p>
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -316,7 +392,7 @@ export default function WhatsAppConnectPage() {
                       </div>
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                      channel.status === 'connected' ? 'bg-success/10 text-success' :
+                      channel.status === 'connected'  ? 'bg-success/10 text-success' :
                       channel.status === 'connecting' ? 'bg-warning/10 text-warning' :
                       'bg-destructive/10 text-destructive'
                     }`}>
@@ -339,14 +415,29 @@ export default function WhatsAppConnectPage() {
 
                 <div className="px-5 py-3 bg-muted/30 border-t border-border flex items-center gap-2">
                   {channel.status !== 'connected' && channel.evolution_api_url && (
-                    <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => handleGetQRCode(channel)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7"
+                      onClick={() => handleGetQRCode(channel)}
+                    >
                       <QrCode className="h-3 w-3 mr-1" /> QR Code
                     </Button>
                   )}
-                  <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => handleCheckStatus(channel)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-7"
+                    onClick={() => handleCheckStatus(channel)}
+                  >
                     <RefreshCw className="h-3 w-3 mr-1" /> Status
                   </Button>
-                  <Button size="sm" variant="outline" className="text-xs h-7 text-destructive hover:text-destructive" onClick={() => handleDelete(channel)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-7 text-destructive hover:text-destructive"
+                    onClick={() => handleDelete(channel)}
+                  >
                     <Trash2 className="h-3 w-3 mr-1" /> Remover
                   </Button>
                 </div>
