@@ -23,7 +23,7 @@ export default function LoginPage() {
     setLoading(false);
     if (ok) {
       const user = useAuthStore.getState().user;
-      navigate(user?.papel === 'GESTOR' ? '/gestor/dashboard' : '/atendente/conversas');
+      navigate('/gestor/dashboard');
     } else {
       setError('E-mail ou senha inválidos');
     }

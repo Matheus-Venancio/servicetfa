@@ -22,12 +22,18 @@ export default function ConversasPage({ role, filterByAtendente }: { role: 'GEST
     leads, leadSelecionado, mensagens, busca, setBusca, digitando,
     setLeadSelecionado, enviarMensagem, assumirConversa, redistribuirLead,
     filtroSidebar, setFiltroSidebar,
+    carregarLeads, inscreverRealtime, carregandoLeads, carregandoMensagens
   } = useConversaStore();
 
   const [input, setInput] = useState('');
   const [modo, setModo] = useState<'mensagem' | 'nota'>('mensagem');
   const [showRedistribuir, setShowRedistribuir] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    carregarLeads();
+    inscreverRealtime();
+  }, [carregarLeads, inscreverRealtime]);
 
   // Filter leads based on role
   const filteredLeads = useMemo(() => {
@@ -47,10 +53,12 @@ export default function ConversasPage({ role, filterByAtendente }: { role: 'GEST
   // Select lead from URL
   useEffect(() => {
     if (id) {
-      const lead = leads.find((l) => l._id === id);
-      if (lead) setLeadSelecionado(lead);
+      if (leadSelecionado?._id !== id) {
+        const lead = leads.find((l) => l._id === id);
+        if (lead) setLeadSelecionado(lead);
+      }
     }
-  }, [id, leads]);
+  }, [id, leads, leadSelecionado?._id]);
 
   // Auto-scroll chat
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [mensagens, digitando]);
@@ -136,7 +144,12 @@ export default function ConversasPage({ role, filterByAtendente }: { role: 'GEST
         </div>
 
         {/* Lead list */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto relative">
+          {carregandoLeads && leads.length === 0 && (
+            <div className="absolute inset-0 bg-card/50 flex items-center justify-center z-10 backdrop-blur-[1px]">
+              <span className="text-sm text-muted-foreground animate-pulse">Carregando conversas...</span>
+            </div>
+          )}
           {filteredLeads.map((lead) => (
             <button
               key={lead._id}
@@ -196,11 +209,25 @@ export default function ConversasPage({ role, filterByAtendente }: { role: 'GEST
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 bg-surface-secondary">
+            <div 
+              className="flex-1 overflow-y-auto px-[5%] py-4 relative"
+              style={{
+                backgroundColor: '#efeae2',
+                backgroundImage: 'url("https://w0.peakpx.com/wallpaper/818/148/HD-wallpaper-whatsapp-background-solid-color-whatsapp-backgrounds-thumbnail.jpg")',
+                backgroundRepeat: 'repeat',
+                backgroundSize: '400px',
+                backgroundBlendMode: 'overlay', // Soften the pattern
+              }}
+            >
+              {carregandoMensagens && mensagens.length === 0 && (
+                <div className="absolute inset-0 bg-[#efeae2]/50 flex items-center justify-center z-10 backdrop-blur-[1px]">
+                  <span className="text-sm text-[#111b21] font-medium bg-white px-3 py-1.5 rounded-full shadow-sm animate-pulse">Carregando mensagens...</span>
+                </div>
+              )}
               {groupedMessages.map((group) => (
                 <div key={group.date}>
                   <div className="flex items-center justify-center my-4">
-                    <span className="text-xs text-muted-foreground bg-card px-3 py-1 rounded-full border border-border">
+                    <span className="text-xs text-[#54656f] bg-white px-3 py-1 rounded-lg border border-transparent shadow shadow-black/5">
                       {group.date}
                     </span>
                   </div>
