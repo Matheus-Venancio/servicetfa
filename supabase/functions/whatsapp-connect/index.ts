@@ -26,7 +26,10 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, instanceName, evolutionApiUrl, apiKey, atendenteId, atendenteNome, phoneNumber } = await req.json()
+    const { action, instanceName, atendenteId, atendenteNome, phoneNumber } = await req.json()
+    // Fallback: Use Deno.env if not provided in payload (more secure)
+    const evolutionApiUrl = req.json?.evolutionApiUrl || Deno.env.get('EVOLUTION_URL')
+    const apiKey = req.json?.apiKey || Deno.env.get('EVOLUTION_API')
 
     if (action === 'create_instance') {
       // Register the channel in our DB
@@ -131,11 +134,14 @@ Deno.serve(async (req) => {
         })
       }
 
+      const eUrl = channel.evolution_api_url || Deno.env.get('EVOLUTION_URL')
+      const eKey = channel.api_key || Deno.env.get('EVOLUTION_API')
+
       // If Evolution API is configured, check live status
-      if (channel.evolution_api_url && channel.api_key) {
+      if (eUrl && eKey) {
         try {
-          const statusRes = await fetch(`${channel.evolution_api_url}/instance/connectionState/${instanceName}`, {
-            headers: { 'apikey': channel.api_key },
+          const statusRes = await fetch(`${eUrl}/instance/connectionState/${instanceName}`, {
+            headers: { 'apikey': eKey },
           })
           const statusData = await statusRes.json()
           const state = statusData.instance?.state || 'disconnected'
@@ -168,14 +174,17 @@ Deno.serve(async (req) => {
         .eq('instance_name', instanceName)
         .single()
 
-      if (!channel?.evolution_api_url || !channel?.api_key) {
+      const eUrl = channel?.evolution_api_url || Deno.env.get('EVOLUTION_URL')
+      const eKey = channel?.api_key || Deno.env.get('EVOLUTION_API')
+
+      if (!eUrl || !eKey) {
         return new Response(JSON.stringify({ error: 'Evolution API not configured' }), { 
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         })
       }
 
-      const connectRes = await fetch(`${channel.evolution_api_url}/instance/connect/${instanceName}`, {
-        headers: { 'apikey': channel.api_key },
+      const connectRes = await fetch(`${eUrl}/instance/connect/${instanceName}`, {
+        headers: { 'apikey': eKey },
       })
       const connectData = await connectRes.json()
 

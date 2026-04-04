@@ -3,6 +3,7 @@ import { MOCK_METRICAS, MOCK_ATENDENTES } from '@/lib/mockData';
 import { Card } from '@/components/ui/card';
 import { TrendingUp, Users, CheckCircle, Percent, Flame } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { PainelFila } from '@/components/dashboard/PainelFila';
 
 function AnimatedNumber({ value, suffix = '' }: { value: number; suffix?: string }) {
   const [display, setDisplay] = useState(0);
@@ -49,6 +50,10 @@ export default function DashboardPage() {
             {c.sub && <p className="text-xs text-muted-foreground mt-1">{c.sub}</p>}
           </Card>
         ))}
+      </div>
+
+      <div className="mb-6">
+        <PainelFila />
       </div>
 
       {/* Row 2 */}
