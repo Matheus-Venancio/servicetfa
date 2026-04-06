@@ -40,6 +40,7 @@ export default function AtendentesPage() {
   const [showModal, setShowModal] = useState(false);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [isGeneratingQr, setIsGeneratingQr] = useState<string | null>(null);
 
   // Form
   const [nome, setNome] = useState('');
@@ -79,42 +80,34 @@ export default function AtendentesPage() {
 
     setSubmitting(true);
     console.log('Entrou aqui ' + nome, email.trim(), telefone.trim(), maxLeads);
-    try {
-// Override explícito da conexão com os dados do .env passados (exigência do cenário)
-      const url = import.meta.env.VITE_SUPABASE_URL;
-      const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-      const password = import.meta.env.VITE_SUPABASE_PASSWORD;
-      
-      console.log('urls' + url, key);
-      const localSupabase = createClient(url, key, {
-        global: {
-           headers: {
-             apikey: key,
-             Authorization: `Bearer ${key}`
-           }
-        }
-      });
+    // AtendentesPage.tsx
 
-      console.log('Conectado ao Supabase' + localSupabase);
-      // 1. Cria o atendente no Supabase de fato conectando explícitamente na key inserida no .env
-      const { data: newAtendente, error: dbError } = await (localSupabase
+    try {
+      const url = import.meta.env.VITE_SUPABASE_URL;
+      const key = import.meta.env.VITE_SUPABASE_ANON_KEY; // ✅ era PUBLISHABLE_KEY — chave errada
+
+      const localSupabase = createClient(url, key); // ✅ sem headers manuais — o SDK injeta apikey e Authorization automaticamente
+
+      // 1. Insere o atendente
+      const { data: newAtendente, error: dbError } = await localSupabase
         .from('atendentes')
         .insert({
-          nome: nome,
-          email: email,
-          telefone: telefone,
+          nome,
+          email,
+          telefone: telefone || null, // ✅ garante null se vazio, evita string vazia quebrando constraint
           papel: 'ATENDENTE',
           status: 'OFFLINE',
           max_leads: maxLeads,
-        } as any)
+        })
         .select()
-        .single() as unknown as Promise<{ data: Atendente | null; error: any }>);
+        .single<Atendente>(); // ✅ tipagem direta no .single(), sem cast duplo
 
-        console.log('Cliente criado');
+      if (dbError) throw new Error(dbError.message);
+      if (!newAtendente) throw new Error('Atendente não retornado após inserção');
 
-      if (dbError || !newAtendente) throw new Error(dbError?.message || 'Erro ao criar atendente');
+      console.log('Atendente criado:', newAtendente);
 
-      // 2. Invocar edge function do WhatsApp Connect usando fallbacks do .env lá no servidor
+      // 2. Edge function do WhatsApp Connect
       const instanceName = `tfa-${newAtendente.id.slice(0, 8)}`;
       toast.info('Atendente criado. Gerando QR Code...');
 
@@ -143,11 +136,143 @@ export default function AtendentesPage() {
       }
 
       await fetchAtendentes();
+
     } catch (err: any) {
-      toast.error('Falha inesperada');
+      console.error('Erro ao cadastrar atendente:', err);
+      toast.error('Falha inesperada: ' + (err?.message ?? 'erro desconhecido'));
     }
+
     setSubmitting(false);
+
   };
+
+  const EVOLUTION_URL = 'https://evolution.innovatedigitals.com.br';
+const EVOLUTION_TOKEN = 'd3b7573358045479207c1e94adfbf4a3';
+
+// Utilitário de espera
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const handleGerarQR = async (atendente: Atendente) => {
+  setIsGeneratingQr(atendente.id);
+  setNome(atendente.nome);
+  toast.info(`Criando instância para ${atendente.nome}...`);
+
+  try {
+    const instanceName = `tfa-${atendente.id.slice(0, 8)}`;
+
+    // PASSO 1 — Criar (ou recriar) a instância na Evolution
+    const createRes = await fetch(`${EVOLUTION_URL}/instance/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': EVOLUTION_TOKEN,
+      },
+      body: JSON.stringify({
+        instanceName,
+        qrcode: true,
+        integration: 'WHATSAPP-BAILEYS',
+      }),
+    });
+
+    if (!createRes.ok) {
+      const errBody = await createRes.json().catch(() => ({}));
+
+      // Se a instância já existe, tenta deletar e recriar
+      if (createRes.status === 409 || errBody?.message?.includes('already')) {
+        toast.info('Instância já existe. Reconectando...');
+
+        await fetch(`${EVOLUTION_URL}/instance/delete/${instanceName}`, {
+          method: 'DELETE',
+          headers: { 'apikey': EVOLUTION_TOKEN },
+        });
+
+        await sleep(1500);
+
+        const retryRes = await fetch(`${EVOLUTION_URL}/instance/create`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': EVOLUTION_TOKEN,
+          },
+          body: JSON.stringify({
+            instanceName,
+            qrcode: true,
+            integration: 'WHATSAPP-BAILEYS',
+          }),
+        });
+
+        if (!retryRes.ok) {
+          const retryErr = await retryRes.json().catch(() => ({}));
+          throw new Error(retryErr?.message ?? `Erro ao recriar instância: ${retryRes.status}`);
+        }
+      } else {
+        throw new Error(errBody?.message ?? `Erro ao criar instância: ${createRes.status}`);
+      }
+    }
+
+    // PASSO 2 — Aguarda a instância inicializar antes de buscar o QR
+    toast.info('Aguardando inicialização...');
+    await sleep(3000);
+
+    // PASSO 3 — Buscar o QR Code
+    const connectRes = await fetch(`${EVOLUTION_URL}/instance/connect/${instanceName}`, {
+      method: 'GET',
+      headers: { 'apikey': EVOLUTION_TOKEN },
+    });
+
+    if (!connectRes.ok) {
+      const errBody = await connectRes.json().catch(() => ({}));
+      throw new Error(errBody?.message ?? `Erro ao buscar QR: ${connectRes.status}`);
+    }
+
+    const connectData = await connectRes.json();
+    console.log('Evolution connect response:', connectData);
+
+    // PASSO 4 — Extrair o QR Code da resposta
+    // A Evolution pode retornar em formatos diferentes dependendo da versão
+    const base64QR =
+      connectData?.base64 ||
+      connectData?.qrcode?.base64 ||
+      connectData?.qr?.base64 ||
+      connectData?.data?.qrcode?.base64 ||
+      null;
+
+    const pairingCode =
+      connectData?.pairingCode ||
+      connectData?.qrcode?.pairingCode ||
+      null;
+
+    if (base64QR) {
+      // Garante que tem o prefixo data:image correto
+      const qrDataUrl = base64QR.startsWith('data:image')
+        ? base64QR
+        : `data:image/png;base64,${base64QR}`;
+
+      setQrCode(qrDataUrl);
+      toast.success('QR Code gerado! Escaneie com o WhatsApp.');
+
+    } else if (connectData?.instance?.state === 'open') {
+      toast.info('Este número já está conectado ao WhatsApp.');
+
+    } else {
+      // Log completo para debug
+      console.error('Resposta inesperada da Evolution:', JSON.stringify(connectData, null, 2));
+      toast.warning('QR Code não retornado. Veja o console para detalhes.');
+    }
+
+    // PASSO 5 — Salva o instanceName no Supabase para referência futura
+    await supabase
+      .from('atendentes')
+      .update({ instance_name: instanceName } as never)
+      .eq('id', atendente.id);
+
+  } catch (err: any) {
+    console.error('Erro ao gerar QR:', err);
+    toast.error('Erro ao gerar QR Code: ' + (err?.message ?? 'erro desconhecido'));
+  }
+
+  setIsGeneratingQr(null);
+};
 
   const handleVerConversas = (id: string) => {
     navigate(`/gestor/atendentes/${id}/conversas`);
@@ -278,8 +403,24 @@ export default function AtendentesPage() {
                         <MessageCircle className="h-3.5 w-3.5" />
                         <span>Ver painel de rotina</span>
                       </div>
-                      <div className="flex items-center gap-1 text-xs text-primary font-medium group-hover:gap-2 transition-all">
-                        <ChevronRight className="h-3.5 w-3.5" />
+                      <div className="flex items-center gap-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs px-2 hover:bg-primary/10"
+                          onClick={(e) => { e.stopPropagation(); handleGerarQR(a); }}
+                          disabled={isGeneratingQr === a.id}
+                        >
+                          {isGeneratingQr === a.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                          ) : (
+                            <QrCode className="h-3 w-3 mr-1" />
+                          )}
+                          Gerar QR
+                        </Button>
+                        <div className="flex items-center gap-1 text-xs text-primary font-medium group-hover:gap-2 transition-all">
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        </div>
                       </div>
                     </div>
                   </Card>
@@ -321,7 +462,7 @@ export default function AtendentesPage() {
                   <img src={qrCode} alt="WhatsApp QR Code" className="w-full object-contain mx-auto aspect-square" />
                 </div>
 
-                <Button className="w-full mt-4" onClick={() => { setQrCode(null); setShowModal(false);setNome('');setEmail('');setTelefone(''); }}>
+                <Button className="w-full mt-4" onClick={() => { setQrCode(null); setShowModal(false); setNome(''); setEmail(''); setTelefone(''); }}>
                   Concluído
                 </Button>
               </div>
@@ -331,7 +472,7 @@ export default function AtendentesPage() {
                   <h3 className="text-lg font-bold">Novo Atendente</h3>
                   <p className="text-sm text-muted-foreground">A instância WhatsApp será preparada assim que salvarmos.</p>
                 </div>
-                
+
                 <div className="space-y-4">
                   <div>
                     <Label>Nome Completo</Label>

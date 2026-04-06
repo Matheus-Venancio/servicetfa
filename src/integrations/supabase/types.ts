@@ -13,6 +13,7 @@ export interface Database {
           status: 'ONLINE' | 'OCUPADO' | 'OFFLINE'
           max_leads: number
           avatar_url: string | null
+          instance_name: string | null
           criado_em: string
           atualizado_em: string
         }
@@ -25,6 +26,7 @@ export interface Database {
           status?: 'ONLINE' | 'OCUPADO' | 'OFFLINE'
           max_leads?: number
           avatar_url?: string | null
+          instance_name?: string | null
         }
         Update: { [key: string]: any }
       }
