@@ -26,99 +26,92 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, instanceName, atendenteId, atendenteNome, phoneNumber } = await req.json()
-    // Fallback: Use Deno.env if not provided in payload (more secure)
-    const evolutionApiUrl = req.json?.evolutionApiUrl || Deno.env.get('EVOLUTION_URL')
-    const apiKey = req.json?.apiKey || Deno.env.get('EVOLUTION_API')
+    const bodyConfig = await req.json()
+    const { action, instanceName, atendenteId, atendenteNome, phoneNumber } = bodyConfig
+    // Fallback: Use body variables, otherwise Deno.env
+    const evolutionApiUrl = bodyConfig.evolutionApiUrl || Deno.env.get('EVOLUTION_URL')
+    const apiKey = bodyConfig.apiKey || Deno.env.get('EVOLUTION_API')
 
     if (action === 'create_instance') {
-      // Register the channel in our DB
-      const { data: channel, error } = await supabase
-        .from('whatsapp_channels')
-        .upsert({
-          instance_name: instanceName,
-          evolution_api_url: evolutionApiUrl,
-          api_key: apiKey,
-          atendente_id: atendenteId,
-          atendente_nome: atendenteNome,
-          phone_number: phoneNumber,
-          status: 'connecting',
-        }, { onConflict: 'instance_name' })
-        .select()
-        .single()
+      if (!evolutionApiUrl || !apiKey) {
+        return new Response(JSON.stringify({ error: 'Evolution API credentials missing' }), { status: 400, headers: corsHeaders })
+      }
 
-      if (error) {
-        return new Response(JSON.stringify({ error: error.message }), { 
-          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      let qrcode = null
+      let status = 'disconnected'
+
+      try {
+        // 1. Tentar criar a instância na Evolution API PRIMEIRO
+        const createRes = await fetch(`${evolutionApiUrl}/instance/create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': apiKey },
+          body: JSON.stringify({
+            instanceName,
+            integration: 'WHATSAPP-BAILEYS',
+            qrcode: true,
+            webhook: {
+              url: `${Deno.env.get('SUPABASE_URL')}/functions/v1/whatsapp-webhook`,
+              events: ['messages.upsert', 'connection.update'],
+            },
+          }),
+        })
+
+        const createData = await createRes.json()
+
+        if (!createRes.ok) {
+          // Instância já existe, tenta conectar
+          const connectRes = await fetch(`${evolutionApiUrl}/instance/connect/${instanceName}`, {
+            method: 'GET',
+            headers: { 'apikey': apiKey },
+          })
+          const connectData = await connectRes.json()
+          qrcode = extractQrCode(connectData)
+          status = connectData.instance?.state || 'connecting'
+          console.log('connect fallback response keys:', Object.keys(connectData), 'qrcode found:', !!qrcode)
+        } else {
+          qrcode = extractQrCode(createData)
+          status = 'connecting'
+          console.log('create_instance response keys:', Object.keys(createData), 'qrcode found:', !!qrcode)
+        }
+
+        // 2. Após gerar a instância com sucesso na Evolution, salvamos no Banco de Dados
+        console.log('Creating instance table text:', instanceName, evolutionApiUrl, apiKey, atendenteId, atendenteNome, phoneNumber)
+        const { data: channel, error } = await supabase
+          .from('whatsapp_channels')
+          .upsert({
+            instance_name: instanceName,
+            evolution_api_url: evolutionApiUrl,
+            api_key: apiKey,
+            atendente_id: atendenteId,
+            atendente_nome: atendenteNome,
+            phone_number: phoneNumber,
+            status: status === 'open' ? 'connected' : status,
+          }, { onConflict: 'instance_name' })
+          .select()
+          .single()
+
+        if (error) {
+           throw new Error('Falha ao inserir no supabase: ' + error.message)
+        }
+
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          channel, 
+          qrcode,
+          status
+        }), { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        })
+      } catch (evoError: any) {
+        console.error('Evolution API error:', evoError)
+        return new Response(JSON.stringify({ 
+          ok: false, 
+          error_evolution: 'Não foi possível conectar à Evolution API ou salvar a instância: ' + (evoError.message || evoError),
+          status: 'disconnected'
+        }), { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         })
       }
-
-      // If Evolution API URL is provided, create instance and get QR code
-      if (evolutionApiUrl && apiKey) {
-        try {
-          // Create instance on Evolution API
-          const createRes = await fetch(`${evolutionApiUrl}/instance/create`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': apiKey },
-            body: JSON.stringify({
-              instanceName,
-              integration: 'WHATSAPP-BAILEYS',
-              qrcode: true,
-              webhook: {
-                url: `${Deno.env.get('SUPABASE_URL')}/functions/v1/whatsapp-webhook`,
-                events: ['messages.upsert', 'connection.update'],
-              },
-            }),
-          })
-
-          const createData = await createRes.json()
-
-          if (!createRes.ok) {
-            // Instance might already exist, try to connect
-            const connectRes = await fetch(`${evolutionApiUrl}/instance/connect/${instanceName}`, {
-              method: 'GET',
-              headers: { 'apikey': apiKey },
-            })
-            const connectData = await connectRes.json()
-
-            const qrcode = extractQrCode(connectData)
-            console.log('connect fallback response keys:', Object.keys(connectData), 'qrcode found:', !!qrcode)
-            return new Response(JSON.stringify({ 
-              ok: true, 
-              channel, 
-              qrcode,
-              status: connectData.instance?.state || 'connecting'
-            }), { 
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-            })
-          }
-
-          const qrcode = extractQrCode(createData)
-          console.log('create_instance response keys:', Object.keys(createData), 'qrcode found:', !!qrcode)
-          return new Response(JSON.stringify({ 
-            ok: true, 
-            channel, 
-            qrcode,
-            status: 'connecting'
-          }), { 
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-          })
-        } catch (evoError) {
-          console.error('Evolution API error:', evoError)
-          return new Response(JSON.stringify({ 
-            ok: true, 
-            channel, 
-            error_evolution: 'Não foi possível conectar à Evolution API. Verifique a URL e a chave.',
-            status: 'disconnected'
-          }), { 
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-          })
-        }
-      }
-
-      return new Response(JSON.stringify({ ok: true, channel, status: 'disconnected' }), { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-      })
     }
 
     if (action === 'check_status') {

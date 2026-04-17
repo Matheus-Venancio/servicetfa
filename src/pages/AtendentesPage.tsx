@@ -110,16 +110,65 @@ export default function AtendentesPage() {
       // 2. Edge function do WhatsApp Connect
       const instanceName = `tfa-${newAtendente.id.slice(0, 8)}`;
       toast.info('Atendente criado. Gerando QR Code...');
+const EVOLUTION_URL = 'https://evolution.innovatedigitals.com.br';
+const EVOLUTION_TOKEN = 'd3b7573358045479207c1e94adfbf4a3';
 
-      const { data: qrcData, error: evoError } = await supabase.functions.invoke('whatsapp-connect', {
-        body: {
-          action: 'create_instance',
-          instanceName,
-          atendenteId: newAtendente.id,
-          atendenteNome: newAtendente.nome,
-          phoneNumber: newAtendente.telefone,
-        },
-      });
+const createRes = await fetch(`${EVOLUTION_URL}/instance/create`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_TOKEN },
+  body: JSON.stringify({
+    instanceName,
+    qrcode: true,
+    integration: 'WHATSAPP-BAILEYS',
+    ...(telefone ? { number: telefone } : {}),
+  }),
+});
+
+if (!createRes.ok) {
+  const err = await createRes.json().catch(() => ({}));
+  throw new Error(err?.message ?? `Evolution create falhou: ${createRes.status}`);
+}
+
+// 3. Aguarda inicialização e busca o QR
+toast.info('Aguardando QR Code...');
+await new Promise(r => setTimeout(r, 3000));
+
+const connectRes = await fetch(`${EVOLUTION_URL}/instance/connect/${instanceName}`, {
+  method: 'GET',
+  headers: { 'apikey': EVOLUTION_TOKEN },
+});
+
+if (!connectRes.ok) {
+  const err = await connectRes.json().catch(() => ({}));
+  throw new Error(err?.message ?? `Evolution connect falhou: ${connectRes.status}`);
+}
+
+const connectData = await connectRes.json();
+const base64QR =
+  connectData?.base64 ||
+  connectData?.qrcode?.base64 ||
+  connectData?.qr?.base64 ||
+  null;
+
+if (!base64QR) throw new Error('QR Code não retornado pela Evolution');
+
+const qrDataUrl = base64QR.startsWith('data:image') ? base64QR : `data:image/png;base64,${base64QR}`;
+setQrCode(qrDataUrl);
+toast.success('Escaneie o QR Code para parear o WhatsApp.');
+
+// 4. SÓ AGORA salva no whatsapp_channels
+const { data: qrcData, error: evoError } = await supabase.functions.invoke('whatsapp-connect', {
+  body: {
+    action: 'create_instance',
+    instanceName,
+    atendenteId: newAtendente.id,
+    atendenteNome: newAtendente.nome,
+    phoneNumber: newAtendente.telefone,
+    status: 'connected',
+    evolutionApiUrl: EVOLUTION_URL,
+    apiKey: EVOLUTION_TOKEN,
+  },
+});
 
       if (evoError) {
         toast.warning('Atendente criado, mas houve falha na geração do QR: ' + evoError.message);

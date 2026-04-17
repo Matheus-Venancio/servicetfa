@@ -13,12 +13,16 @@ import {
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface EvoChat {
-  id: string;
-  name?: string;
+  id: string; // agora sempre preenchido com remoteJid
   lastMessage?: {
-    message?: { conversation?: string; extendedTextMessage?: { text: string } };
+    key?: {
+      remoteJid?: string;
+      fromMe?: boolean;
+    };
+    messageType?: string;
+    message?: any;
     messageTimestamp?: number;
-    key?: { fromMe?: boolean };
+    pushName?: string;
   };
   unreadCount?: number;
 }
@@ -71,7 +75,8 @@ function formatarData(ts?: number): string {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
-function phoneLabel(jid: string): string {
+function phoneLabel(jid: string | null | undefined): string {
+  if (!jid) return 'Desconhecido';
   return jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
 }
 
@@ -163,23 +168,27 @@ export default function AtendenteConversasPage() {
   }, []);
 
   // ── 3. Busca lista de chats ───────────────────────────────────────────────
-  const fetchChats = useCallback(async (inst?: string) => {
-    const iName = inst || instanceName;
-    if (!iName) return;
-    setLoadingChats(true);
-    setChatsError(null);
-    try {
-      const data = await callMirror({ action: 'get_chats', instanceName: iName, atendenteId });
-      const lista: EvoChat[] = data.chats ?? [];
-      lista.sort((a, b) => (b.lastMessage?.messageTimestamp ?? 0) - (a.lastMessage?.messageTimestamp ?? 0));
-      setChats(lista);
-      if (lista.length === 0) setChatsError('A instância não retornou conversas. Verifique se o WhatsApp está conexo e com mensagens.');
-    } catch (e: any) {
-      console.error('[Mirror] fetchChats error:', e.message);
-      setChatsError(e.message);
+const fetchChats = useCallback(async (inst?: string) => {
+  const iName = inst || instanceName;
+  if (!iName) return;
+  setLoadingChats(true);
+  setChatsError(null);
+
+  try {
+    const data = await callMirror({ action: 'get_chats', instanceName: iName, atendenteId });
+    const lista: EvoChat[] = (data.chats ?? []);
+    lista.sort((a, b) => (b.lastMessage?.messageTimestamp ?? 0) - (a.lastMessage?.messageTimestamp ?? 0));
+    setChats(lista);
+
+    if (lista.length === 0) {
+      setChatsError('Nenhuma conversa encontrada.');
     }
-    setLoadingChats(false);
-  }, [instanceName, atendenteId, callMirror]);
+  } catch (e: any) {
+    setChatsError('Erro ao carregar conversas: ' + e.message);
+  }
+
+  setLoadingChats(false);
+}, [instanceName, atendenteId, callMirror]);
 
   useEffect(() => {
     if (instanceName) fetchChats();

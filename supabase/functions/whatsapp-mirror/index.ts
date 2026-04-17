@@ -65,32 +65,29 @@ Deno.serve(async (req) => {
 
     console.log(`[Mirror] action=${action} instance=${resolvedInstance} evoUrl=${evoUrl}`)
 
-    // ── GET CHATS ─────────────────────────────────────────────────────────────
-    if (action === 'get_chats') {
-      let raw: any
-      let status: number
-      try {
-        const res = await fetch(`${evoUrl}/chat/findChats/${resolvedInstance}`, {
-          method: 'GET',
-          headers: { apikey: evoKey },
-        })
-        status = res.status
-        raw = await res.json().catch(() => ({}))
-        console.log(`[Mirror] get_chats → HTTP ${status}`, JSON.stringify(raw).slice(0, 300))
-      } catch (fetchErr) {
-        return json({ ok: false, error: `Falha ao conectar na Evolution API: ${fetchErr}` })
-      }
+    // ── GET CHATS (tenta múltiplos endpoints da Evolution API) ────────────────
+   if (action === 'get_chats') {
+  // Endpoint correto confirmado
+  const res = await fetch(`${evoUrl}/chat/findChats/${resolvedInstance}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: evoKey },
+    body: '{}',
+  });
 
-      if (status !== 200 && status !== 201) {
-        return json({
-          ok: false,
-          error: `Evolution API retornou ${status}: ${raw?.message || raw?.error || JSON.stringify(raw).slice(0, 200)}`,
-        })
-      }
+  if (!res.ok) {
+    return new Response(JSON.stringify({ ok: false, error: `Evolution retornou ${res.status}` }), { headers: corsHeaders });
+  }
 
-      const chats = Array.isArray(raw) ? raw : (raw?.chats ?? raw?.data ?? [])
-      return json({ ok: true, chats, instanceName: resolvedInstance, total: chats.length })
-    }
+  const raw = await res.json();
+
+  // Normaliza: injeta id a partir do remoteJid pois a Evolution retorna id: null
+  const chats = (Array.isArray(raw) ? raw : []).map((c: any) => ({
+    ...c,
+    id: c.id ?? c.lastMessage?.key?.remoteJid ?? null,
+  })).filter((c: any) => c.id != null);
+
+  return new Response(JSON.stringify({ chats }), { headers: corsHeaders });
+}
 
     // ── GET MESSAGES ──────────────────────────────────────────────────────────
     if (action === 'get_messages') {
