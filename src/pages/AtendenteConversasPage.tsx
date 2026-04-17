@@ -119,7 +119,7 @@ export default function AtendenteConversasPage() {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
+  console.log("ATENDENTE ID NOVO", atendenteId)
   // ── 1. Carrega atendente + canal do Supabase ──────────────────────────────
   useEffect(() => {
     if (!atendenteId) return;
@@ -129,7 +129,7 @@ export default function AtendenteConversasPage() {
 
       const { data: a, error: aErr } = await (supabase
         .from('atendentes').select('*').eq('id', atendenteId).single() as any);
-
+      console.log("ATENDENTE banco de dados", a)
       if (aErr || !a) {
         setSetupError('Atendente não encontrado no banco de dados.');
         setLoadingSetup(false);
@@ -139,7 +139,7 @@ export default function AtendenteConversasPage() {
 
       const { data: ch } = await (supabase
         .from('whatsapp_channels').select('*').eq('atendente_id', atendenteId).maybeSingle() as any);
-
+      console.log("CANAL banco de dados", ch)
       if (ch) {
         setChannel(ch);
         setInstanceName(ch.instance_name);
@@ -206,12 +206,30 @@ export default function AtendenteConversasPage() {
     if (!instanceName || !jid) return;
     setLoadingMsgs(true);
     try {
-      const data = await callMirror({ action: 'get_messages', instanceName, remoteJid: jid });
-      const records: EvoMessage[] = data.messages ?? [];
-      records.sort((a, b) => (a.messageTimestamp ?? 0) - (b.messageTimestamp ?? 0));
-      setMessages(records);
+      const data = await callMirror({
+        action: 'get_messages',
+        instanceName,
+        remoteJid: jid,
+      });
+
+      console.log('[Mirror] get_messages RAW:', JSON.stringify(data).slice(0, 500));
+      const raw =
+        data?.messages ??
+        data?.data?.messages ??
+        data?.data ??
+        (Array.isArray(data) ? data : null) ??
+        [];
+
+      const lista: EvoMessage[] = Array.isArray(raw)
+        ? raw.filter((m: any) => m?.key != null)
+        : [];
+
+      lista.sort((a, b) => (a.messageTimestamp ?? 0) - (b.messageTimestamp ?? 0));
+      setMessages(lista);
+      console.log('[Mirror] mensagens processadas:', lista.length);
     } catch (e: any) {
-      console.error('[Mirror] fetchMessages error:', e.message);
+      console.error('[Mirror] fetchMessages ERRO:', e.message);
+      toast.error('Erro ao carregar mensagens: ' + e.message);
     }
     setLoadingMsgs(false);
   }, [instanceName, callMirror]);
@@ -238,7 +256,7 @@ export default function AtendenteConversasPage() {
       await callMirror({
         action: 'send_message',
         instanceName,
-        numero: phoneLabel(selectedJid),
+        numero: selectedJid.replace('@s.whatsapp.net', '').replace('@g.us', ''), // número limpo só para envio
         message: texto,
       });
       setTimeout(() => fetchMessages(selectedJid), 1200);
@@ -286,11 +304,11 @@ export default function AtendenteConversasPage() {
     return groups;
   })();
 
-// Onde define chatsFiltrados, troca para:
-const chatsFiltrados = chats.filter(c =>
-  chatLabel(c).toLowerCase().includes(busca.toLowerCase()) ||
-  phoneLabel(c.id).includes(busca)
-);
+  // Onde define chatsFiltrados, troca para:
+  const chatsFiltrados = chats.filter(c =>
+    chatLabel(c).toLowerCase().includes(busca.toLowerCase()) ||
+    phoneLabel(c.id).includes(busca)
+  );
 
   // ── Loading setup ─────────────────────────────────────────────────────────
   if (loadingSetup) {
@@ -475,7 +493,7 @@ const chatsFiltrados = chats.filter(c =>
             <>
               {/* Chat header */}
               <div className="h-14 px-4 flex items-center gap-3 border-b border-border bg-card shrink-0">
-                
+
                 <AvatarInicial nome={selectedName} size="sm" />
                 <div>
                   <h3 className="font-semibold text-sm">{selectedName}</h3>
@@ -502,17 +520,18 @@ const chatsFiltrados = chats.filter(c =>
                   </div>
                 )}
 
-                {groupedMessages.map((group) => (
-                  <div key={group.date}>
+                {groupedMessages.map((group, gIdx) => (
+                  <div key={group.date ?? `group-${gIdx}`}>
                     <div className="flex justify-center my-4">
                       <span className="text-xs text-[#54656f] bg-white px-3 py-1 rounded-lg shadow-sm">{group.date}</span>
                     </div>
-                    {group.msgs.map((msg) => {
+                    {group.msgs.map((msg, idx) => {
                       const isMine = msg.key.fromMe;
                       const texto = extrairTexto(msg.message);
                       const hora = formatarHora(msg.messageTimestamp);
+                      const uniqueKey = msg.key?.id ?? `${msg.messageTimestamp}-${idx}`;
                       return (
-                        <div key={msg.key.id} className={`flex mb-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
+                        <div key={uniqueKey} className={`flex mb-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
                           <div className={`max-w-[70%] rounded-lg px-3 py-1.5 shadow-sm ${isMine ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none' : 'bg-white text-[#111b21] rounded-bl-none'
                             }`}>
                             {!isMine && msg.pushName && (
@@ -533,7 +552,13 @@ const chatsFiltrados = chats.filter(c =>
                 {messages.length === 0 && !loadingMsgs && (
                   <div className="flex flex-col items-center justify-center h-full gap-2">
                     <MessageCircle className="h-10 w-10 text-[#54656f]/30" />
-                    <p className="text-sm text-[#54656f]">Nenhuma mensagem nesta conversa</p>
+                    <p className="text-sm text-[#54656f]">Nenhuma mensagem encontrada</p>
+                    <button
+                      onClick={() => selectedJid && fetchMessages(selectedJid)}
+                      className="text-xs text-blue-500 underline mt-1"
+                    >
+                      Tentar novamente
+                    </button>
                   </div>
                 )}
                 <div ref={chatEndRef} />

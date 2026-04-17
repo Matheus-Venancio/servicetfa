@@ -109,33 +109,96 @@ if (action === 'get_chats') {
 }
 
     // ── GET MESSAGES ──────────────────────────────────────────────────────────
+    // if (action === 'get_messages') {
+    //   if (!remoteJid) return json({ ok: false, error: 'remoteJid obrigatório' })
+
+    //   let raw: any; let status: number
+    //   try {
+    //     const res = await fetch(`${evoUrl}/chat/findMessages/${resolvedInstance}`, {
+    //       method: 'POST',
+    //       headers: { 'Content-Type': 'application/json', apikey: evoKey },
+    //       body: JSON.stringify({ where: { key: { remoteJid } }, limit: 60 }),
+    //     })
+    //     status = res.status
+    //     raw = await res.json().catch(() => ({}))
+    //     console.log(`[Mirror] get_messages → HTTP ${status}`, JSON.stringify(raw).slice(0, 200))
+    //   } catch (fetchErr) {
+    //     return json({ ok: false, error: `Falha ao buscar mensagens: ${fetchErr}` })
+    //   }
+
+    //   if (status !== 200 && status !== 201) {
+    //     return json({
+    //       ok: false,
+    //       error: `Evolution API retornou ${status}: ${raw?.message || JSON.stringify(raw).slice(0, 200)}`,
+    //     })
+    //   }
+
+    //   const messages = raw?.messages?.records ?? raw?.records ?? (Array.isArray(raw) ? raw : [])
+    //   return json({ ok: true, messages })
+    // }
+
     if (action === 'get_messages') {
-      if (!remoteJid) return json({ ok: false, error: 'remoteJid obrigatório' })
+  const { remoteJid } = body;
 
-      let raw: any; let status: number
-      try {
-        const res = await fetch(`${evoUrl}/chat/findMessages/${resolvedInstance}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', apikey: evoKey },
-          body: JSON.stringify({ where: { key: { remoteJid } }, limit: 60 }),
-        })
-        status = res.status
-        raw = await res.json().catch(() => ({}))
-        console.log(`[Mirror] get_messages → HTTP ${status}`, JSON.stringify(raw).slice(0, 200))
-      } catch (fetchErr) {
-        return json({ ok: false, error: `Falha ao buscar mensagens: ${fetchErr}` })
+  // Tenta os endpoints conhecidos da Evolution por versão
+  const candidatos = [
+    {
+      method: 'POST',
+      url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
+      body: JSON.stringify({ where: { key: { remoteJid } } }),
+    },
+    {
+      method: 'POST', 
+      url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
+      body: JSON.stringify({ remoteJid }),
+    },
+    {
+      method: 'GET',
+      url: `${evoUrl}/chat/findMessages/${resolvedInstance}?remoteJid=${encodeURIComponent(remoteJid)}`,
+    },
+    {
+      method: 'POST',
+      url: `${evoUrl}/message/findMessages/${resolvedInstance}`,
+      body: JSON.stringify({ where: { key: { remoteJid } } }),
+    },
+  ];
+
+  let messages: any[] = [];
+  let lastStatus = 0;
+
+  for (const c of candidatos) {
+    try {
+      const opts: RequestInit = {
+        method: c.method,
+        headers: { 'Content-Type': 'application/json', apikey: evoKey },
+      };
+      if (c.method === 'POST' && (c as any).body) opts.body = (c as any).body;
+
+      const res = await fetch(c.url, opts);
+      lastStatus = res.status;
+      const resBody = await res.json().catch(() => ({}));
+
+      console.log(`[Mirror] get_messages tentativa: ${c.method} ${c.url} → ${res.status}`, JSON.stringify(resBody).slice(0, 200));
+
+      if (res.ok) {
+        // Normaliza o retorno
+        messages =
+          resBody?.messages?.records ??
+          resBody?.messages ??
+          resBody?.records ??
+          (Array.isArray(resBody) ? resBody : []);
+        break;
       }
-
-      if (status !== 200 && status !== 201) {
-        return json({
-          ok: false,
-          error: `Evolution API retornou ${status}: ${raw?.message || JSON.stringify(raw).slice(0, 200)}`,
-        })
-      }
-
-      const messages = raw?.messages?.records ?? raw?.records ?? (Array.isArray(raw) ? raw : [])
-      return json({ ok: true, messages })
+    } catch (e) {
+      console.error('[Mirror] candidato erro:', e);
     }
+  }
+
+  return new Response(
+    JSON.stringify({ messages }),
+    { headers: corsHeaders }
+  );
+}
 
     // ── SEND MESSAGE ──────────────────────────────────────────────────────────
     if (action === 'send_message') {
