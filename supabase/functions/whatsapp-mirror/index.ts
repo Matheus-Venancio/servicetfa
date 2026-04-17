@@ -66,27 +66,46 @@ Deno.serve(async (req) => {
     console.log(`[Mirror] action=${action} instance=${resolvedInstance} evoUrl=${evoUrl}`)
 
     // ── GET CHATS (tenta múltiplos endpoints da Evolution API) ────────────────
-   if (action === 'get_chats') {
-  // Endpoint correto confirmado
-  const res = await fetch(`${evoUrl}/chat/findChats/${resolvedInstance}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', apikey: evoKey },
-    body: '{}',
-  });
+if (action === 'get_chats') {
+  // Busca chats e contatos em paralelo
+  const [chatsRes, contactsRes] = await Promise.all([
+    fetch(`${evoUrl}/chat/findChats/${resolvedInstance}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: evoKey },
+      body: '{}',
+    }),
+    fetch(`${evoUrl}/contact/findContacts/${resolvedInstance}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: evoKey },
+      body: '{}',
+    }),
+  ]);
 
-  if (!res.ok) {
-    return new Response(JSON.stringify({ ok: false, error: `Evolution retornou ${res.status}` }), { headers: corsHeaders });
+  const rawChats = await chatsRes.json().catch(() => []);
+  const rawContacts = await contactsRes.json().catch(() => []);
+
+  // Monta dicionário: remoteJid → nome
+  const contactMap: Record<string, string> = {};
+  const contactList = Array.isArray(rawContacts) ? rawContacts : (rawContacts?.contacts ?? []);
+  for (const c of contactList) {
+    if (c.id) {
+      contactMap[c.id] = c.pushName || c.notify || c.name || '';
+    }
   }
 
-  const raw = await res.json();
+  // Normaliza chats injetando nome do contato
+  const chats = (Array.isArray(rawChats) ? rawChats : []).map((c: any) => {
+    const jid = c.id ?? c.lastMessage?.key?.remoteJid ?? null;
+    const isGroup = jid?.endsWith('@g.us');
+    const nome =
+      contactMap[jid] ||
+      (!isGroup ? c.lastMessage?.pushName : null) ||
+      null;
 
-  // Normaliza: injeta id a partir do remoteJid pois a Evolution retorna id: null
-  const chats = (Array.isArray(raw) ? raw : []).map((c: any) => ({
-    ...c,
-    id: c.id ?? c.lastMessage?.key?.remoteJid ?? null,
-  })).filter((c: any) => c.id != null);
+    return { ...c, id: jid, contactName: nome };
+  }).filter((c: any) => c.id != null);
 
-  return new Response(JSON.stringify({ chats }), { headers: corsHeaders });
+  return json({ ok: true, chats });
 }
 
     // ── GET MESSAGES ──────────────────────────────────────────────────────────

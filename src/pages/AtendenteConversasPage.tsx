@@ -13,7 +13,8 @@ import {
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface EvoChat {
-  id: string; // agora sempre preenchido com remoteJid
+  id: string;
+  contactName?: string | null;
   lastMessage?: {
     key?: {
       remoteJid?: string;
@@ -80,6 +81,12 @@ function phoneLabel(jid: string | null | undefined): string {
   return jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
 }
 
+function chatLabel(chat: EvoChat): string {
+  if (chat.contactName) return chat.contactName;
+  if (chat.lastMessage?.pushName && chat.lastMessage.pushName !== 'Você') return chat.lastMessage.pushName;
+  return phoneLabel(chat.id);
+}
+
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const POLL_INTERVAL = 7000;
 
@@ -88,30 +95,30 @@ export default function AtendenteConversasPage() {
   const { atendenteId } = useParams<{ atendenteId: string }>();
   const navigate = useNavigate();
 
-  const [atendente, setAtendente]       = useState<Atendente | null>(null);
-  const [channel, setChannel]           = useState<Channel | null>(null);
+  const [atendente, setAtendente] = useState<Atendente | null>(null);
+  const [channel, setChannel] = useState<Channel | null>(null);
   const [instanceName, setInstanceName] = useState<string>('');
   const [loadingSetup, setLoadingSetup] = useState(true);
-  const [setupError, setSetupError]     = useState<string | null>(null);
+  const [setupError, setSetupError] = useState<string | null>(null);
 
-  const [chats, setChats]               = useState<EvoChat[]>([]);
+  const [chats, setChats] = useState<EvoChat[]>([]);
   const [loadingChats, setLoadingChats] = useState(false);
-  const [chatsError, setChatsError]     = useState<string | null>(null);
+  const [chatsError, setChatsError] = useState<string | null>(null);
 
-  const [selectedJid, setSelectedJid]     = useState<string | null>(null);
-  const [selectedName, setSelectedName]   = useState('');
-  const [messages, setMessages]           = useState<EvoMessage[]>([]);
-  const [loadingMsgs, setLoadingMsgs]     = useState(false);
+  const [selectedJid, setSelectedJid] = useState<string | null>(null);
+  const [selectedName, setSelectedName] = useState('');
+  const [messages, setMessages] = useState<EvoMessage[]>([]);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
 
-  const [input, setInput]   = useState('');
+  const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const [busca, setBusca]   = useState('');
+  const [busca, setBusca] = useState('');
 
   // Campo para o gestor digitar o instance name manualmente se não estiver no banco
   const [manualInstance, setManualInstance] = useState('');
 
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const pollRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── 1. Carrega atendente + canal do Supabase ──────────────────────────────
   useEffect(() => {
@@ -155,7 +162,7 @@ export default function AtendenteConversasPage() {
           const bodyText = typeof ctx.json === 'function' ? await ctx.json() : null;
           if (bodyText?.error) detail = bodyText.error;
         }
-      } catch {}
+      } catch { }
       throw new Error(detail);
     }
 
@@ -168,27 +175,27 @@ export default function AtendenteConversasPage() {
   }, []);
 
   // ── 3. Busca lista de chats ───────────────────────────────────────────────
-const fetchChats = useCallback(async (inst?: string) => {
-  const iName = inst || instanceName;
-  if (!iName) return;
-  setLoadingChats(true);
-  setChatsError(null);
+  const fetchChats = useCallback(async (inst?: string) => {
+    const iName = inst || instanceName;
+    if (!iName) return;
+    setLoadingChats(true);
+    setChatsError(null);
 
-  try {
-    const data = await callMirror({ action: 'get_chats', instanceName: iName, atendenteId });
-    const lista: EvoChat[] = (data.chats ?? []);
-    lista.sort((a, b) => (b.lastMessage?.messageTimestamp ?? 0) - (a.lastMessage?.messageTimestamp ?? 0));
-    setChats(lista);
+    try {
+      const data = await callMirror({ action: 'get_chats', instanceName: iName, atendenteId });
+      const lista: EvoChat[] = (data.chats ?? []);
+      lista.sort((a, b) => (b.lastMessage?.messageTimestamp ?? 0) - (a.lastMessage?.messageTimestamp ?? 0));
+      setChats(lista);
 
-    if (lista.length === 0) {
-      setChatsError('Nenhuma conversa encontrada.');
+      if (lista.length === 0) {
+        setChatsError('Nenhuma conversa encontrada.');
+      }
+    } catch (e: any) {
+      setChatsError('Erro ao carregar conversas: ' + e.message);
     }
-  } catch (e: any) {
-    setChatsError('Erro ao carregar conversas: ' + e.message);
-  }
 
-  setLoadingChats(false);
-}, [instanceName, atendenteId, callMirror]);
+    setLoadingChats(false);
+  }, [instanceName, atendenteId, callMirror]);
 
   useEffect(() => {
     if (instanceName) fetchChats();
@@ -279,10 +286,11 @@ const fetchChats = useCallback(async (inst?: string) => {
     return groups;
   })();
 
-  const chatsFiltrados = chats.filter((c) => {
-    if (!busca) return true;
-    return (c.name || phoneLabel(c.id)).toLowerCase().includes(busca.toLowerCase());
-  });
+// Onde define chatsFiltrados, troca para:
+const chatsFiltrados = chats.filter(c =>
+  chatLabel(c).toLowerCase().includes(busca.toLowerCase()) ||
+  phoneLabel(c.id).includes(busca)
+);
 
   // ── Loading setup ─────────────────────────────────────────────────────────
   if (loadingSetup) {
@@ -353,6 +361,9 @@ const fetchChats = useCallback(async (inst?: string) => {
     );
   }
 
+  // Variável derivada: chat selecionado atualmente
+  const selectedChat = chats.find(c => c.id === selectedJid);
+
   // ── Interface principal — Espelho WhatsApp ────────────────────────────────
   return (
     <div className="h-full flex flex-col">
@@ -420,20 +431,23 @@ const fetchChats = useCallback(async (inst?: string) => {
             ) : (
               chatsFiltrados.map((chat) => {
                 const isSelected = selectedJid === chat.id;
-                const lastText   = extrairTexto(chat.lastMessage?.message as any);
+                const lastText = extrairTexto(chat.lastMessage?.message as any);
                 return (
                   <button
                     key={chat.id}
-                    onClick={() => { setSelectedJid(chat.id); setSelectedName(chat.name || phoneLabel(chat.id)); setMessages([]); }}
-                    className={`w-full text-left flex items-center gap-3 px-3 py-3 border-b border-border/50 transition-colors ${
-                      isSelected ? 'bg-primary/8 border-l-[3px] border-l-primary' : 'hover:bg-muted/50 border-l-[3px] border-l-transparent'
-                    }`}
+                    onClick={() => {
+                      setSelectedJid(chat.id);
+                      setSelectedName(chatLabel(chat));
+                      setMessages([]);
+                    }}
+                    className={`w-full text-left flex items-center gap-3 px-3 py-3 border-b border-border/50 transition-colors ${isSelected ? 'bg-primary/8 border-l-[3px] border-l-primary' : 'hover:bg-muted/50 border-l-[3px] border-l-transparent'
+                      }`}
                   >
-                    <AvatarInicial nome={chat.name || phoneLabel(chat.id)} size="sm" />
+                    <AvatarInicial nome={chatLabel(chat)} size="sm" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-0.5">
                         <span className="font-medium text-sm text-foreground truncate">
-                          {chat.name || phoneLabel(chat.id)}
+                          {chatLabel(chat)}
                         </span>
                         {chat.lastMessage?.messageTimestamp && (
                           <span className="text-[10px] text-muted-foreground shrink-0 ml-1">
@@ -461,10 +475,11 @@ const fetchChats = useCallback(async (inst?: string) => {
             <>
               {/* Chat header */}
               <div className="h-14 px-4 flex items-center gap-3 border-b border-border bg-card shrink-0">
+                
                 <AvatarInicial nome={selectedName} size="sm" />
                 <div>
                   <h3 className="font-semibold text-sm">{selectedName}</h3>
-                  <p className="text-xs text-muted-foreground">{phoneLabel(selectedJid)}</p>
+                  <p className="text-xs text-muted-foreground">{phoneLabel(chats.find(c => c.id === selectedJid)?.id ?? selectedJid)}</p>
                 </div>
               </div>
 
@@ -494,13 +509,12 @@ const fetchChats = useCallback(async (inst?: string) => {
                     </div>
                     {group.msgs.map((msg) => {
                       const isMine = msg.key.fromMe;
-                      const texto  = extrairTexto(msg.message);
-                      const hora   = formatarHora(msg.messageTimestamp);
+                      const texto = extrairTexto(msg.message);
+                      const hora = formatarHora(msg.messageTimestamp);
                       return (
                         <div key={msg.key.id} className={`flex mb-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[70%] rounded-lg px-3 py-1.5 shadow-sm ${
-                            isMine ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none' : 'bg-white text-[#111b21] rounded-bl-none'
-                          }`}>
+                          <div className={`max-w-[70%] rounded-lg px-3 py-1.5 shadow-sm ${isMine ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none' : 'bg-white text-[#111b21] rounded-bl-none'
+                            }`}>
                             {!isMine && msg.pushName && (
                               <p className="text-xs font-semibold text-primary mb-0.5">{msg.pushName}</p>
                             )}
