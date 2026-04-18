@@ -183,7 +183,10 @@ export default function AtendenteConversasPage() {
 
     try {
       const data = await callMirror({ action: 'get_chats', instanceName: iName, atendenteId });
-      const lista: EvoChat[] = (data.chats ?? []);
+      const lista: EvoChat[] = (data.chats ?? []).filter((c: EvoChat) =>
+        c.lastMessage?.id != null && c.lastMessage?.id !== 'null'
+      );
+      console.log("LISTA DE CONVERSAS", lista)
       lista.sort((a, b) => (b.lastMessage?.messageTimestamp ?? 0) - (a.lastMessage?.messageTimestamp ?? 0));
       setChats(lista);
 
@@ -201,21 +204,29 @@ export default function AtendenteConversasPage() {
     if (instanceName) fetchChats();
   }, [instanceName]);
 
+  const instanceNameRef = useRef(instanceName);
+  useEffect(() => { instanceNameRef.current = instanceName; }, [instanceName]);
+
   // ── 4. Busca mensagens de um chat ─────────────────────────────────────────
   const fetchMessages = useCallback(async (jid: string) => {
-    if (!instanceName || !jid) return;
+    const inst = instanceNameRef.current;
+    if (!inst || !jid) return;
     setLoadingMsgs(true);
     try {
       const data = await callMirror({
         action: 'get_messages',
-        instanceName,
+        instanceName: inst,
         remoteJid: jid,
       });
 
-      const raw: any[] = data?.messages ?? [];
+      console.log('[Mirror] get_messages RAW:', data);
 
-      // Filtra mensagens sem key.id válido (evita key=null no React)
-      // e remove duplicatas pelo key.id
+      const raw: any[] =
+        data?.messages?.records ??
+        data?.messages ??
+        data?.records ??
+        (Array.isArray(data) ? data : []);
+
       const seen = new Set<string>();
       const lista: EvoMessage[] = raw
         .filter((m: any) => m?.key?.id != null)
@@ -227,13 +238,13 @@ export default function AtendenteConversasPage() {
 
       lista.sort((a, b) => (a.messageTimestamp ?? 0) - (b.messageTimestamp ?? 0));
       setMessages(lista);
-      console.log('[Mirror] mensagens carregadas:', lista.length);
+      console.log('[Mirror] mensagens processadas:', lista.length);
     } catch (e: any) {
       console.error('[Mirror] fetchMessages ERRO:', e.message);
       toast.error('Erro ao carregar mensagens: ' + e.message);
     }
     setLoadingMsgs(false);
-  }, [instanceName, callMirror]);
+  }, [callMirror]); // ← remove instanceName das deps, usa ref
 
   // Polling de mensagens
   useEffect(() => {
@@ -451,15 +462,14 @@ export default function AtendenteConversasPage() {
                 <button
                   key={chat.id}
                   onClick={() => {
-                    setSelectedJid(chat.id);
                     setSelectedName(chatLabel(chat));
+                    setSelectedJid(chat.id);
                     setMessages([]);
                   }}
-                  className={`w-full text-left flex items-center gap-3 px-4 py-3.5 border-b border-border/40 transition-all duration-150 ${
-                    isSelected
-                      ? 'bg-primary/10 border-l-[3px] border-l-primary'
-                      : 'hover:bg-muted/60 border-l-[3px] border-l-transparent'
-                  }`}
+                  className={`w-full text-left flex items-center gap-3 px-4 py-3.5 border-b border-border/40 transition-all duration-150 ${isSelected
+                    ? 'bg-primary/10 border-l-[3px] border-l-primary'
+                    : 'hover:bg-muted/60 border-l-[3px] border-l-transparent'
+                    }`}
                 >
                   <AvatarInicial nome={chatLabel(chat)} size="md" />
                   <div className="flex-1 min-w-0">
@@ -564,11 +574,10 @@ export default function AtendenteConversasPage() {
                     const uniqueKey = msg.key?.id ?? `${msg.messageTimestamp}-${idx}`;
                     return (
                       <div key={uniqueKey} className={`flex mb-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[80%] rounded-lg px-3 py-1.5 shadow-sm ${
-                          isMine
-                            ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none'
-                            : 'bg-white text-[#111b21] rounded-bl-none'
-                        }`}>
+                        <div className={`max-w-[80%] rounded-lg px-3 py-1.5 shadow-sm ${isMine
+                          ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none'
+                          : 'bg-white text-[#111b21] rounded-bl-none'
+                          }`}>
                           {!isMine && msg.pushName && (
                             <p className="text-xs font-semibold text-primary mb-0.5">{msg.pushName}</p>
                           )}

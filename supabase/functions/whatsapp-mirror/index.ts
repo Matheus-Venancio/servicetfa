@@ -66,47 +66,48 @@ Deno.serve(async (req) => {
     console.log(`[Mirror] action=${action} instance=${resolvedInstance} evoUrl=${evoUrl}`)
 
     // ── GET CHATS (tenta múltiplos endpoints da Evolution API) ────────────────
-if (action === 'get_chats') {
-  // Busca chats e contatos em paralelo
-  const [chatsRes, contactsRes] = await Promise.all([
-    fetch(`${evoUrl}/chat/findChats/${resolvedInstance}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: evoKey },
-      body: '{}',
-    }),
-    fetch(`${evoUrl}/contact/findContacts/${resolvedInstance}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: evoKey },
-      body: '{}',
-    }),
-  ]);
+    if (action === 'get_chats') {
+      // Busca chats e contatos em paralelo
+      const [chatsRes, contactsRes] = await Promise.all([
+        fetch(`${evoUrl}/chat/findChats/${resolvedInstance}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: evoKey },
+          body: '{}',
+        }),
+        fetch(`${evoUrl}/contact/findContacts/${resolvedInstance}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: evoKey },
+          body: '{}',
+        }),
+      ]);
 
-  const rawChats = await chatsRes.json().catch(() => []);
-  const rawContacts = await contactsRes.json().catch(() => []);
+      const rawChats = await chatsRes.json().catch(() => []);
+      const rawContacts = await contactsRes.json().catch(() => []);
 
-  // Monta dicionário: remoteJid → nome
-  const contactMap: Record<string, string> = {};
-  const contactList = Array.isArray(rawContacts) ? rawContacts : (rawContacts?.contacts ?? []);
-  for (const c of contactList) {
-    if (c.id) {
-      contactMap[c.id] = c.pushName || c.notify || c.name || '';
+      // Monta dicionário: remoteJid → nome
+      const contactMap: Record<string, string> = {};
+      const contactList = Array.isArray(rawContacts) ? rawContacts : (rawContacts?.contacts ?? []);
+      for (const c of contactList) {
+        if (c.id) {
+          contactMap[c.id] = c.pushName || c.notify || c.name || '';
+        }
+      }
+
+      // Normaliza chats injetando nome do contato
+      const chats = (Array.isArray(rawChats) ? rawChats : []).map((c: any) => {
+        const jid = c.id ?? c.lastMessage?.key?.remoteJid ?? null;
+        console.log("JID TESTE", jid)
+        const isGroup = jid?.endsWith('@g.us');
+        const nome =
+          contactMap[jid] ||
+          (!isGroup ? c.lastMessage?.pushName : null) ||
+          null;
+
+        return { ...c, id: jid, contactName: nome };
+      }).filter((c: any) => c.id != null);
+
+      return json({ ok: true, chats });
     }
-  }
-
-  // Normaliza chats injetando nome do contato
-  const chats = (Array.isArray(rawChats) ? rawChats : []).map((c: any) => {
-    const jid = c.id ?? c.lastMessage?.key?.remoteJid ?? null;
-    const isGroup = jid?.endsWith('@g.us');
-    const nome =
-      contactMap[jid] ||
-      (!isGroup ? c.lastMessage?.pushName : null) ||
-      null;
-
-    return { ...c, id: jid, contactName: nome };
-  }).filter((c: any) => c.id != null);
-
-  return json({ ok: true, chats });
-}
 
     // ── GET MESSAGES ──────────────────────────────────────────────────────────
     if (action === 'get_messages') {
