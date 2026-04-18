@@ -212,21 +212,22 @@ export default function AtendenteConversasPage() {
         remoteJid: jid,
       });
 
-      console.log('[Mirror] get_messages RAW:', JSON.stringify(data).slice(0, 500));
-      const raw =
-        data?.messages ??
-        data?.data?.messages ??
-        data?.data ??
-        (Array.isArray(data) ? data : null) ??
-        [];
+      const raw: any[] = data?.messages ?? [];
 
-      const lista: EvoMessage[] = Array.isArray(raw)
-        ? raw.filter((m: any) => m?.key != null)
-        : [];
+      // Filtra mensagens sem key.id válido (evita key=null no React)
+      // e remove duplicatas pelo key.id
+      const seen = new Set<string>();
+      const lista: EvoMessage[] = raw
+        .filter((m: any) => m?.key?.id != null)
+        .filter((m: any) => {
+          if (seen.has(m.key.id)) return false;
+          seen.add(m.key.id);
+          return true;
+        });
 
       lista.sort((a, b) => (a.messageTimestamp ?? 0) - (b.messageTimestamp ?? 0));
       setMessages(lista);
-      console.log('[Mirror] mensagens processadas:', lista.length);
+      console.log('[Mirror] mensagens carregadas:', lista.length);
     } catch (e: any) {
       console.error('[Mirror] fetchMessages ERRO:', e.message);
       toast.error('Erro ao carregar mensagens: ' + e.message);
@@ -379,9 +380,6 @@ export default function AtendenteConversasPage() {
     );
   }
 
-  // Variável derivada: chat selecionado atualmente
-  const selectedChat = chats.find(c => c.id === selectedJid);
-
   // ── Interface principal — Espelho WhatsApp ────────────────────────────────
   return (
     <div className="h-full flex flex-col">
@@ -410,199 +408,224 @@ export default function AtendenteConversasPage() {
         </Button>
       </div>
 
-      {/* Corpo principal */}
-      <div className="flex flex-1 overflow-hidden">
-
-        {/* ── Lista de conversas ── */}
-        <div className="flex flex-col shrink-0 border-r border-border bg-card" style={{ width: '320px' }}>
-          <div className="p-3 border-b border-border">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar..."
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-                className="pl-9 h-8 text-sm bg-muted/50"
-              />
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto">
-            {loadingChats && chats.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-40 gap-2">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                <p className="text-xs text-muted-foreground">Buscando conversas na Evolution API...</p>
-              </div>
-            ) : chatsError ? (
-              <div className="flex flex-col items-center justify-center h-full gap-3 px-4 text-center py-8">
-                <AlertTriangle className="h-10 w-10 text-warning/60" />
-                <p className="text-xs text-muted-foreground">{chatsError}</p>
-                <Button size="sm" variant="outline" onClick={() => fetchChats()}>
-                  <RefreshCw className="h-3 w-3 mr-1" /> Tentar novamente
-                </Button>
-              </div>
-            ) : chatsFiltrados.length === 0 && !loadingChats ? (
-              <div className="flex flex-col items-center justify-center h-40 gap-2 px-4 text-center">
-                <MessageCircle className="h-10 w-10 text-muted-foreground/30" />
-                <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada</p>
-              </div>
-            ) : (
-              chatsFiltrados.map((chat) => {
-                const isSelected = selectedJid === chat.id;
-                const lastText = extrairTexto(chat.lastMessage?.message as any);
-                return (
-                  <button
-                    key={chat.id}
-                    onClick={() => {
-                      setSelectedJid(chat.id);
-                      setSelectedName(chatLabel(chat));
-                      setMessages([]);
-                    }}
-                    className={`w-full text-left flex items-center gap-3 px-3 py-3 border-b border-border/50 transition-colors ${isSelected ? 'bg-primary/8 border-l-[3px] border-l-primary' : 'hover:bg-muted/50 border-l-[3px] border-l-transparent'
-                      }`}
-                  >
-                    <AvatarInicial nome={chatLabel(chat)} size="sm" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-0.5">
-                        <span className="font-medium text-sm text-foreground truncate">
-                          {chatLabel(chat)}
-                        </span>
-                        {chat.lastMessage?.messageTimestamp && (
-                          <span className="text-[10px] text-muted-foreground shrink-0 ml-1">
-                            {formatarData(chat.lastMessage.messageTimestamp)}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground truncate">{lastText}</p>
-                    </div>
-                    {(chat.unreadCount ?? 0) > 0 && (
-                      <span className="bg-success text-white text-[10px] rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center font-mono shrink-0">
-                        {chat.unreadCount}
-                      </span>
-                    )}
-                  </button>
-                );
-              })
-            )}
+      {/* Lista de conversas — ocupa a tela inteira */}
+      <div className="flex-1 overflow-hidden flex flex-col bg-card">
+        {/* Busca */}
+        <div className="p-3 border-b border-border shrink-0">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar conversa..."
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              className="pl-9 h-9 text-sm bg-muted/50"
+            />
           </div>
         </div>
 
-        {/* ── Área de mensagens ── */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {selectedJid ? (
-            <>
-              {/* Chat header */}
-              <div className="h-14 px-4 flex items-center gap-3 border-b border-border bg-card shrink-0">
-
-                <AvatarInicial nome={selectedName} size="sm" />
-                <div>
-                  <h3 className="font-semibold text-sm">{selectedName}</h3>
-                  <p className="text-xs text-muted-foreground">{phoneLabel(chats.find(c => c.id === selectedJid)?.id ?? selectedJid)}</p>
-                </div>
-              </div>
-
-              {/* Mensagens */}
-              <div
-                className="flex-1 overflow-y-auto px-6 py-4 relative"
-                style={{
-                  backgroundColor: '#efeae2',
-                  backgroundImage: 'url("https://w0.peakpx.com/wallpaper/818/148/HD-wallpaper-whatsapp-background-solid-color-whatsapp-backgrounds-thumbnail.jpg")',
-                  backgroundRepeat: 'repeat',
-                  backgroundSize: '400px',
-                  backgroundBlendMode: 'overlay',
-                }}
-              >
-                {loadingMsgs && messages.length === 0 && (
-                  <div className="absolute inset-0 flex items-center justify-center z-10">
-                    <span className="bg-white px-4 py-2 rounded-full shadow text-sm text-[#111b21] animate-pulse">
-                      Carregando mensagens...
-                    </span>
-                  </div>
-                )}
-
-                {groupedMessages.map((group, gIdx) => (
-                  <div key={group.date ?? `group-${gIdx}`}>
-                    <div className="flex justify-center my-4">
-                      <span className="text-xs text-[#54656f] bg-white px-3 py-1 rounded-lg shadow-sm">{group.date}</span>
-                    </div>
-                    {group.msgs.map((msg, idx) => {
-                      const isMine = msg.key.fromMe;
-                      const texto = extrairTexto(msg.message);
-                      const hora = formatarHora(msg.messageTimestamp);
-                      const uniqueKey = msg.key?.id ?? `${msg.messageTimestamp}-${idx}`;
-                      return (
-                        <div key={uniqueKey} className={`flex mb-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[70%] rounded-lg px-3 py-1.5 shadow-sm ${isMine ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none' : 'bg-white text-[#111b21] rounded-bl-none'
-                            }`}>
-                            {!isMine && msg.pushName && (
-                              <p className="text-xs font-semibold text-primary mb-0.5">{msg.pushName}</p>
-                            )}
-                            <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{texto}</p>
-                            <div className={`flex items-center gap-1 mt-0.5 ${isMine ? 'justify-end' : 'justify-start'}`}>
-                              <span className="text-[10px] text-[#54656f]">{hora}</span>
-                              {isMine && <CheckCheck className="h-3 w-3 text-[#53bdeb]" />}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-
-                {messages.length === 0 && !loadingMsgs && (
-                  <div className="flex flex-col items-center justify-center h-full gap-2">
-                    <MessageCircle className="h-10 w-10 text-[#54656f]/30" />
-                    <p className="text-sm text-[#54656f]">Nenhuma mensagem encontrada</p>
-                    <button
-                      onClick={() => selectedJid && fetchMessages(selectedJid)}
-                      className="text-xs text-blue-500 underline mt-1"
-                    >
-                      Tentar novamente
-                    </button>
-                  </div>
-                )}
-                <div ref={chatEndRef} />
-              </div>
-
-              {/* Composer */}
-              <div className="border-t border-border bg-card shrink-0 p-3">
-                <div className="flex items-end gap-2">
-                  <div className="flex-1 bg-muted/50 rounded-xl px-4 py-2">
-                    <textarea
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      placeholder="Digite uma mensagem..."
-                      className="w-full resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none min-h-[20px] max-h-[100px]"
-                      rows={1}
-                    />
-                  </div>
-                  <Button
-                    onClick={handleSend}
-                    size="icon"
-                    disabled={!input.trim() || sending}
-                    className="h-10 w-10 rounded-full shrink-0"
-                  >
-                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  </Button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-center" style={{ backgroundColor: '#f0f2f5' }}>
-              <div className="h-24 w-24 rounded-full bg-white flex items-center justify-center shadow-sm mb-6">
-                <MessageCircle className="h-12 w-12 text-muted-foreground/40" />
-              </div>
-              <h3 className="text-xl font-medium text-[#41525d] mb-2">Espelho de {atendente.nome}</h3>
-              <p className="text-sm text-[#54656f] max-w-xs">Selecione uma conversa à esquerda para visualizar e interagir.</p>
-              <div className="mt-4 flex items-center gap-2 text-xs text-[#54656f]">
-                <Clock className="h-3.5 w-3.5" />
-                <span>Atualiza a cada {POLL_INTERVAL / 1000}s automaticamente</span>
-              </div>
+        {/* Lista */}
+        <div className="flex-1 overflow-y-auto">
+          {loadingChats && chats.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-40 gap-2">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">Buscando conversas...</p>
             </div>
+          ) : chatsError ? (
+            <div className="flex flex-col items-center justify-center h-full gap-3 px-4 text-center py-8">
+              <AlertTriangle className="h-10 w-10 text-warning/60" />
+              <p className="text-xs text-muted-foreground">{chatsError}</p>
+              <Button size="sm" variant="outline" onClick={() => fetchChats()}>
+                <RefreshCw className="h-3 w-3 mr-1" /> Tentar novamente
+              </Button>
+            </div>
+          ) : chatsFiltrados.length === 0 && !loadingChats ? (
+            <div className="flex flex-col items-center justify-center h-40 gap-2 px-4 text-center">
+              <MessageCircle className="h-10 w-10 text-muted-foreground/30" />
+              <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada</p>
+            </div>
+          ) : (
+            chatsFiltrados.map((chat) => {
+              const isSelected = selectedJid === chat.id;
+              const lastText = extrairTexto(chat.lastMessage?.message as any);
+              return (
+                <button
+                  key={chat.id}
+                  onClick={() => {
+                    setSelectedJid(chat.id);
+                    setSelectedName(chatLabel(chat));
+                    setMessages([]);
+                  }}
+                  className={`w-full text-left flex items-center gap-3 px-4 py-3.5 border-b border-border/40 transition-all duration-150 ${
+                    isSelected
+                      ? 'bg-primary/10 border-l-[3px] border-l-primary'
+                      : 'hover:bg-muted/60 border-l-[3px] border-l-transparent'
+                  }`}
+                >
+                  <AvatarInicial nome={chatLabel(chat)} size="md" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="font-semibold text-sm text-foreground truncate">{chatLabel(chat)}</span>
+                      {chat.lastMessage?.messageTimestamp && (
+                        <span className="text-[10px] text-muted-foreground shrink-0 ml-2">
+                          {formatarData(chat.lastMessage.messageTimestamp)}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">{lastText}</p>
+                  </div>
+                  {(chat.unreadCount ?? 0) > 0 && (
+                    <span className="bg-success text-white text-[10px] rounded-full h-5 min-w-[20px] px-1.5 flex items-center justify-center font-mono shrink-0">
+                      {chat.unreadCount}
+                    </span>
+                  )}
+                </button>
+              );
+            })
           )}
         </div>
       </div>
+
+      {/* ── POPUP MODAL de conversa ── */}
+      {selectedJid && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+          onClick={(e) => {
+            // fecha ao clicar fora do modal
+            if (e.target === e.currentTarget) {
+              setSelectedJid(null);
+              setMessages([]);
+            }
+          }}
+        >
+          <div
+            className="flex flex-col rounded-2xl overflow-hidden shadow-2xl"
+            style={{ width: '480px', height: '680px', maxWidth: '95vw', maxHeight: '90vh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header do popup */}
+            <div
+              className="flex items-center gap-3 px-4 py-3 shrink-0"
+              style={{ backgroundColor: '#075e54' }}
+            >
+              <AvatarInicial nome={selectedName} size="md" />
+              <div className="flex-1 min-w-0">
+                <h3 className="font-semibold text-white text-sm truncate">{selectedName}</h3>
+                <p className="text-xs text-white/70">{phoneLabel(selectedJid)}</p>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => selectedJid && fetchMessages(selectedJid)}
+                  className="p-1.5 rounded-full hover:bg-white/10 transition-colors"
+                  title="Atualizar mensagens"
+                >
+                  <RefreshCw className={`h-4 w-4 text-white ${loadingMsgs ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  onClick={() => { setSelectedJid(null); setMessages([]); }}
+                  className="p-1.5 rounded-full hover:bg-white/10 transition-colors"
+                  title="Fechar"
+                >
+                  <span className="text-white text-lg leading-none">×</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Área de mensagens */}
+            <div
+              className="flex-1 overflow-y-auto px-4 py-3 relative"
+              style={{
+                backgroundColor: '#efeae2',
+                backgroundImage: 'url("https://w0.peakpx.com/wallpaper/818/148/HD-wallpaper-whatsapp-background-solid-color-whatsapp-backgrounds-thumbnail.jpg")',
+                backgroundRepeat: 'repeat',
+                backgroundSize: '400px',
+                backgroundBlendMode: 'overlay',
+              }}
+            >
+              {loadingMsgs && messages.length === 0 && (
+                <div className="absolute inset-0 flex items-center justify-center z-10">
+                  <span className="bg-white px-4 py-2 rounded-full shadow text-sm text-[#111b21] animate-pulse">
+                    Carregando mensagens...
+                  </span>
+                </div>
+              )}
+
+              {groupedMessages.map((group, gIdx) => (
+                <div key={group.date ?? `group-${gIdx}`}>
+                  <div className="flex justify-center my-3">
+                    <span className="text-[11px] text-[#54656f] bg-white/90 px-3 py-1 rounded-lg shadow-sm">
+                      {group.date}
+                    </span>
+                  </div>
+                  {group.msgs.map((msg, idx) => {
+                    const isMine = msg.key.fromMe;
+                    const texto = extrairTexto(msg.message);
+                    const hora = formatarHora(msg.messageTimestamp);
+                    const uniqueKey = msg.key?.id ?? `${msg.messageTimestamp}-${idx}`;
+                    return (
+                      <div key={uniqueKey} className={`flex mb-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[80%] rounded-lg px-3 py-1.5 shadow-sm ${
+                          isMine
+                            ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none'
+                            : 'bg-white text-[#111b21] rounded-bl-none'
+                        }`}>
+                          {!isMine && msg.pushName && (
+                            <p className="text-xs font-semibold text-primary mb-0.5">{msg.pushName}</p>
+                          )}
+                          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{texto}</p>
+                          <div className={`flex items-center gap-1 mt-0.5 ${isMine ? 'justify-end' : 'justify-start'}`}>
+                            <span className="text-[10px] text-[#54656f]">{hora}</span>
+                            {isMine && <CheckCheck className="h-3 w-3 text-[#53bdeb]" />}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+
+              {messages.length === 0 && !loadingMsgs && (
+                <div className="flex flex-col items-center justify-center h-full gap-2">
+                  <MessageCircle className="h-10 w-10 text-[#54656f]/30" />
+                  <p className="text-sm text-[#54656f]">Nenhuma mensagem encontrada</p>
+                  <button
+                    onClick={() => selectedJid && fetchMessages(selectedJid)}
+                    className="text-xs text-blue-500 underline mt-1"
+                  >
+                    Tentar novamente
+                  </button>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Composer */}
+            <div className="px-3 py-2 shrink-0" style={{ backgroundColor: '#f0f2f5' }}>
+              <div className="flex items-end gap-2">
+                <div className="flex-1 bg-white rounded-2xl px-4 py-2 shadow-sm">
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Digite uma mensagem..."
+                    className="w-full resize-none bg-transparent text-sm text-[#111b21] placeholder:text-[#8696a0] outline-none min-h-[20px] max-h-[80px]"
+                    rows={1}
+                  />
+                </div>
+                <Button
+                  onClick={handleSend}
+                  size="icon"
+                  disabled={!input.trim() || sending}
+                  className="h-10 w-10 rounded-full shrink-0"
+                  style={{ backgroundColor: '#075e54' }}
+                >
+                  {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
