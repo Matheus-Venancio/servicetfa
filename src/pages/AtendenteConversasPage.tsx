@@ -183,9 +183,7 @@ export default function AtendenteConversasPage() {
 
     try {
       const data = await callMirror({ action: 'get_chats', instanceName: iName, atendenteId });
-      const lista: EvoChat[] = (data.chats ?? []).filter((c: EvoChat) =>
-        c.lastMessage?.id != null && c.lastMessage?.id !== 'null'
-      );
+      const lista: EvoChat[] = (data.chats ?? []);
       console.log("LISTA DE CONVERSAS", lista)
       lista.sort((a, b) => (b.lastMessage?.messageTimestamp ?? 0) - (a.lastMessage?.messageTimestamp ?? 0));
       setChats(lista);

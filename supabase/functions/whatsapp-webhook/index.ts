@@ -5,33 +5,64 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// ─── Constantes ──────────────────────────────────────────────────────────────
-// Instance name do número SAC (o número que o cliente contata)
-const SAC_INSTANCE = 'tfa-a91ddc66'
+// ─── Constante: instance_name do número SAC da empresa ───────────────────────
+const SAC_INSTANCE = 'atendente'
+
+// ─── Helper: normaliza nome do evento ───────────────────────────────────
+function normalizeEvent(event: string): string {
+  return event?.toUpperCase().replace('.', '_')
+}
+
+// ─── Helper: extrai texto da mensagem ──────────────────────────────────────
+function extrairTextoMensagem(message: any): string {
+  if (!message) return '[Mídia]'
+  if (message.conversation) return message.conversation
+  if (message.extendedTextMessage?.text) return message.extendedTextMessage.text
+  if (message.imageMessage?.caption) return message.imageMessage.caption
+  if (message.videoMessage?.caption) return message.videoMessage.caption
+  if (message.documentMessage?.title) return message.documentMessage.title
+  if (message.audioMessage) return '[Áudio]'
+  if (message.stickerMessage) return '[Figurinha]'
+  return '[Mídia]'
+}
+
+console.log("EVOLUTION URL", Deno.env.get('EVOLUTION_URL'))
+
+console.log("extrairTextoMensagem", extrairTextoMensagem)
+// ─── Helper: gera link wa.me ──────────────────────────────────────────────────
+function gerarLinkWhatsApp(telefoneCliente: string, nomeCliente: string | null): string {
+  const texto = `Olá${nomeCliente ? ` ${nomeCliente}` : ''}! Sou seu atendente da TFA Viagens. Como posso ajudar?`
+  return `https://wa.me/${telefoneCliente}?text=${encodeURIComponent(texto)}`
+}
 
 // ─── Helper: envia mensagem via Evolution API ────────────────────────────────
-async function enviarMensagem(
+async function enviarMensagemEvolution(
   evolutionUrl: string,
   apiKey: string,
   instanceName: string,
-  numero: string,        // número destino no formato 5511999999999 (sem @)
+  numero: string,
   texto: string
 ): Promise<boolean> {
   try {
-    const phoneClean = numero.replace('@s.whatsapp.net', '').replace('@g.us', '')
+    const phoneClean = numero.replace('@s.whatsapp.net', '').replace('@g.us', '').replace(/[^0-9]/g, '')
+    console.log(`[Evolution] Enviando mensagem para ${phoneClean} via instância ${instanceName}...`)
+    
     const res = await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'apikey': apiKey },
       body: JSON.stringify({ number: phoneClean, text: texto }),
     })
+    
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
-      console.error(`[enviarMensagem] Falhou (${res.status}):`, err)
+      console.error(`[Evolution] Erro ao enviar (${res.status}):`, err)
       return false
     }
+    
+    console.log(`[Evolution] Mensagem enviada com sucesso para ${phoneClean}`)
     return true
   } catch (e) {
-    console.error('[enviarMensagem] Erro de rede:', e)
+    console.error('[Evolution] Erro de rede:', e)
     return false
   }
 }
@@ -49,245 +80,139 @@ Deno.serve(async (req) => {
     )
 
     const EVOLUTION_URL = Deno.env.get('EVOLUTION_URL') || 'https://evolution.innovatedigitals.com.br'
-    const EVOLUTION_API = Deno.env.get('EVOLUTION_API') || ''
+    const EVOLUTION_API_KEY = Deno.env.get('EVOLUTION_API') || ''
 
     const body = await req.json()
-    console.log('[Webhook] Evento recebido:', body.event, '| Instância:', body.instance)
-
-    const event    = body.event
+    const event = normalizeEvent(body.event)
     const instance = body.instance
-    const data     = body.data
+    const data = body.data
 
-    // ── 1. messages.upsert ───────────────────────────────────────────────────
-    if (event === 'messages.upsert') {
-      const remoteJid      = data?.key?.remoteJid
-      const fromMe         = data?.key?.fromMe || false
-      const mensagemTexto  = data?.message?.conversation
-        || data?.message?.extendedTextMessage?.text
-        || data?.message?.imageMessage?.caption
-        || '[Mídia]'
-      const pushName  = data?.pushName || ''
-      const messageId = data?.key?.id
+    console.log(`[Webhook] Evento: ${event} | Instância: ${instance}`)
 
-      // Ignora broadcasts e status
-      if (!remoteJid || remoteJid === 'status@broadcast') {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
+    if (event === 'MESSAGES_UPSERT') {
+      const remoteJid = data?.key?.remoteJid
+      const fromMe = data?.key?.fromMe || false
+
+      if (!remoteJid || remoteJid === 'status@broadcast' || remoteJid.endsWith('@g.us') || fromMe) {
+        return new Response('Ignorado', { status: 200 })
       }
 
-      // Ignora mensagens enviadas pelo próprio sistema (fromMe)
-      if (fromMe) {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
+      if (instance !== SAC_INSTANCE) {
+        console.log(`[Webhook] Instância ${instance} não é o SAC. Ignorando distribuição.`)
+        return new Response('OK', { status: 200 })
       }
 
-      const contactPhone = remoteJid.replace('@s.whatsapp.net', '').replace('@g.us', '')
+      const telefone = remoteJid.replace('@s.whatsapp.net', '')
+      const nomeContato = data?.pushName?.trim() || null
+      const mensagemTexto = extrairTextoMensagem(data?.message)
 
-      // ── Localiza o canal pelo instance_name ──────────────────────────────
+      console.log(`[Webhook] Mensagem de: ${telefone} (${nomeContato}): ${mensagemTexto}`)
+
+      // 1. Busca Configurações do Canal (para pegar a API Key da instância se necessário)
       const { data: channel } = await supabase
         .from('whatsapp_channels')
         .select('*')
         .eq('instance_name', instance)
         .maybeSingle()
 
-      if (!channel) {
-        console.error('[Webhook] Canal não encontrado para instância:', instance)
-        return new Response(JSON.stringify({ error: 'Channel not found' }), {
-          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
-      }
+      const sacApiKey = channel?.api_key || EVOLUTION_API_KEY
 
-      // ── Verifica se já existe conversa com este contato ──────────────────
-      const { data: conversaExistente } = await supabase
-        .from('conversations')
+      // 2. Localiza ou Cria Lead
+      let { data: lead } = await supabase
+        .from('leads')
         .select('*')
-        .eq('channel_id', channel.id)
-        .eq('remote_jid', remoteJid)
+        .eq('telefone', telefone)
         .maybeSingle()
 
-      // ── NOVO CONTATO no SAC → Round-Robin ────────────────────────────────
-      if (!conversaExistente && instance === SAC_INSTANCE) {
-        console.log('[Webhook] Novo contato no SAC. Iniciando round-robin...')
+      let isNewLead = false
 
-        // Chama a função atômica do Supabase
-        const { data: atendenteId, error: rpcError } = await supabase
-          .rpc('proxima_da_fila')
-
-        if (rpcError) {
-          console.error('[Webhook] Erro no proxima_da_fila:', rpcError)
-        }
-
-        let atendenteSelecionado: any = null
-
-        if (atendenteId) {
-          const { data: atendente } = await supabase
-            .from('atendentes')
-            .select('*')
-            .eq('id', atendenteId)
-            .single()
-
-          atendenteSelecionado = atendente
-          console.log('[Webhook] Atendente selecionado:', atendente?.nome)
-        }
-
-        // Cria conversa vinculada ao atendente selecionado
-        const { data: novaConversa, error: convCreateErr } = await supabase
-          .from('conversations')
+      if (!lead) {
+        console.log('[Webhook] Novo lead detectado. Iniciando round-robin...')
+        isNewLead = true
+        const { data: atendenteId } = await supabase.rpc('proxima_da_fila')
+        
+        const { data: novoLead, error: insertError } = await supabase
+          .from('leads')
           .insert({
-            channel_id: channel.id,
-            remote_jid: remoteJid,
-            contact_name: pushName || contactPhone,
-            contact_phone: contactPhone,
-            atendente_id: atendenteSelecionado?.id ?? null,
-            atendente_nome: atendenteSelecionado?.nome ?? null,
-            status: 'ABERTA',
-            unread_count: 1,
-            last_message: mensagemTexto,
-            last_message_at: new Date().toISOString(),
+            telefone,
+            nome: nomeContato,
+            canal_origem: 'ORGANICO',
+            status: atendenteId ? 'EM_ATENDIMENTO' : 'AGUARDANDO',
+            atendente_id: atendenteId || null,
+            ultima_mensagem: mensagemTexto
           })
           .select()
           .single()
-
-        if (convCreateErr) {
-          console.error('[Webhook] Erro ao criar conversa:', convCreateErr)
-          return new Response(JSON.stringify({ error: convCreateErr.message }), {
-            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          })
-        }
-
-        // Salva a mensagem do cliente
-        await supabase.from('messages').insert({
-          conversation_id: novaConversa!.id,
-          origin: 'LEAD',
-          content: mensagemTexto,
-          sender_name: pushName || contactPhone,
-          sender_phone: contactPhone,
-          whatsapp_message_id: messageId,
-        })
-
-        // ── Encaminha para o WhatsApp do atendente via SAC ────────────────
-        if (atendenteSelecionado?.telefone && EVOLUTION_API) {
-          const sacApiKey   = channel.api_key   || EVOLUTION_API
-          const sacEvoUrl   = channel.evolution_api_url || EVOLUTION_URL
-
-          const notificacao =
-            `📨 *Novo cliente do SAC*\n` +
-            `👤 Nome: ${pushName || 'Desconhecido'}\n` +
-            `📱 Telefone: ${contactPhone}\n\n` +
-            `💬 Mensagem:\n_${mensagemTexto}_\n\n` +
-            `_Responda pelo painel TFA Viagens._`
-
-          const encaminhado = await enviarMensagem(
-            sacEvoUrl,
-            sacApiKey,
-            SAC_INSTANCE,                      // enviamos a partir do SAC
-            atendenteSelecionado.telefone,      // para o número do atendente
-            notificacao
-          )
-
-          console.log('[Webhook] Notificação encaminhada ao atendente:', encaminhado)
-        } else {
-          console.warn('[Webhook] Atendente sem telefone cadastrado ou EVOLUTION_API não configurada. Notificação não enviada.')
-        }
-
-        return new Response(JSON.stringify({ ok: true, distribuido_para: atendenteSelecionado?.nome ?? 'fila_espera' }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
+        
+        if (insertError) throw insertError
+        lead = novoLead
+      } else {
+        // Atualiza última mensagem do lead existente
+        await supabase.from('leads').update({ 
+          ultima_mensagem: mensagemTexto,
+          atualizado_em: new Date().toISOString(),
+          nome: lead.nome || nomeContato // Atualiza nome se estiver vazio
+        }).eq('id', lead.id)
       }
 
-      // ── CONVERSA EXISTENTE → só registra a mensagem ──────────────────────
-      const conversa = conversaExistente ?? null
-
-      if (!conversa) {
-        // Canal que não é SAC e conversa não existe: cria normalmente sem round-robin
-        const { data: novaConversa, error: convErr } = await supabase
-          .from('conversations')
-          .insert({
-            channel_id: channel.id,
-            remote_jid: remoteJid,
-            contact_name: pushName || contactPhone,
-            contact_phone: contactPhone,
-            atendente_id: channel.atendente_id ?? null,
-            atendente_nome: channel.atendente_nome ?? null,
-            status: 'ABERTA',
-            unread_count: 1,
-            last_message: mensagemTexto,
-            last_message_at: new Date().toISOString(),
-          })
-          .select()
-          .single()
-
-        if (convErr) {
-          return new Response(JSON.stringify({ error: convErr.message }), {
-            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          })
-        }
-
-        await supabase.from('messages').insert({
-          conversation_id: novaConversa!.id,
-          origin: 'LEAD',
-          content: mensagemTexto,
-          sender_name: pushName || contactPhone,
-          sender_phone: contactPhone,
-          whatsapp_message_id: messageId,
-        })
-
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
-      }
-
-      // Conversa existente: atualiza e adiciona mensagem
-      await supabase
-        .from('conversations')
-        .update({
-          last_message: mensagemTexto,
-          last_message_at: new Date().toISOString(),
-          contact_name: pushName || conversa.contact_name,
-          unread_count: (conversa.unread_count ?? 0) + 1,
-        })
-        .eq('id', conversa.id)
-
-      await supabase.from('messages').insert({
-        conversation_id: conversa.id,
-        origin: 'LEAD',
-        content: mensagemTexto,
-        sender_name: pushName || contactPhone,
-        sender_phone: contactPhone,
-        whatsapp_message_id: messageId,
+      // 3. Salva Mensagem na Tabela
+      await supabase.from('mensagens').insert({
+        lead_id: lead.id,
+        origem: 'LEAD',
+        tipo: 'TEXTO',
+        conteudo: mensagemTexto,
       })
 
-      return new Response(JSON.stringify({ ok: true }), {
+      // 4. Notificações
+      if (lead.atendente_id) {
+        // Busca dados do atendente
+        const { data: atendente } = await supabase
+          .from('atendentes')
+          .select('*')
+          .eq('id', lead.atendente_id)
+          .single()
+
+        if (atendente) {
+          console.log(`[Webhook] Notificando atendente: ${atendente.nome}`)
+          
+          // Link wa.me para o histórico/painel
+          const linkWaMe = gerarLinkWhatsApp(telefone, nomeContato)
+
+          // A) Registrar Nota de Sistema (Painel)
+          await supabase.from('mensagens').insert({
+            lead_id: lead.id,
+            origem: 'SISTEMA',
+            tipo: 'SISTEMA',
+            conteudo: `🔔 Mensagem recebida de ${nomeContato || telefone}\n📌 Atendente: ${atendente.nome}\n🔗 Link: ${linkWaMe}`
+          })
+
+          // B) Enviar Notificação via WhatsApp para o Atendente
+          if (atendente.telefone) {
+            const msgAtendente = `📨 *Nova mensagem no SAC*\n👤 Cliente: ${nomeContato || telefone}\n💬: ${mensagemTexto}\n\nLink para responder:\n${linkWaMe}`
+            await enviarMensagemEvolution(EVOLUTION_URL, sacApiKey, SAC_INSTANCE, atendente.telefone, msgAtendente)
+          }
+        }
+      }
+
+      // 5. Confirmação ao Cliente (Sempre envia no SAC)
+      console.log(`[Webhook] Enviando confirmação ao cliente: ${telefone}`)
+      const msgCliente = `Olá! Recebemos sua mensagem. Um de nossos atendentes já foi notificado e entrará em contato em breve. 😊`
+      await enviarMensagemEvolution(EVOLUTION_URL, sacApiKey, SAC_INSTANCE, telefone, msgCliente)
+
+      return new Response(JSON.stringify({ ok: true, lead_id: lead.id }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
-    // ── 2. connection.update ─────────────────────────────────────────────────
-    if (event === 'connection.update') {
-      const state = data?.state
-      if (state && instance) {
-        const status = state === 'open' ? 'connected' : state === 'close' ? 'disconnected' : 'connecting'
-        await supabase
-          .from('whatsapp_channels')
-          .update({ status })
-          .eq('instance_name', instance)
-        console.log('[Webhook] Status atualizado para instância', instance, '→', status)
-      }
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
-    return new Response(JSON.stringify({ ok: true, info: 'evento ignorado' }), {
+    return new Response(JSON.stringify({ ok: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
 
   } catch (error) {
-    console.error('[Webhook] Erro crítico:', error)
-    return new Response(JSON.stringify({ error: 'Internal server error' }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    console.error('[Webhook] Erro Crítico:', error)
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
 })

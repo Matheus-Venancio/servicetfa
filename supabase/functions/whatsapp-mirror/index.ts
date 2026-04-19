@@ -95,13 +95,13 @@ Deno.serve(async (req) => {
 
       // Normaliza chats injetando nome do contato
       const chats = (Array.isArray(rawChats) ? rawChats : []).map((c: any) => {
-        const jid = c.id ?? c.lastMessage?.key?.remoteJid ?? null;
-        console.log("JID TESTE", jid)
+        const jid = c.lastMessage?.key?.remoteJid ?? null; // ← usa remoteJid direto, ignora c.id
         const isGroup = jid?.endsWith('@g.us');
         const nome =
           contactMap[jid] ||
-          (!isGroup ? c.lastMessage?.pushName : null) ||
-          null;
+          (!isGroup && c.lastMessage?.pushName && c.lastMessage.pushName !== 'Você'
+            ? c.lastMessage.pushName
+            : null);
 
         return { ...c, id: jid, contactName: nome };
       }).filter((c: any) => c.id != null);

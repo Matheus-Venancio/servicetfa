@@ -202,7 +202,12 @@ export interface Database {
     Views: Record<string, any>
     Enums: Record<string, any>
     CompositeTypes: Record<string, any>
-    Functions: Record<string, any>
+    Functions: {
+      proxima_da_fila: {
+        Args: Record<string, never>   // sem argumentos
+        Returns: string | null        // UUID do atendente selecionado, ou null se ninguém online
+      }
+    }
   }
 }
 
