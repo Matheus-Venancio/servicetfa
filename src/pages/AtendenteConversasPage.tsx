@@ -218,6 +218,9 @@ export default function AtendenteConversasPage() {
       });
 
       console.log('[Mirror] get_messages RAW:', data);
+      console.log('[DEBUG] get_messages resposta completa:', JSON.stringify(data));
+      console.log('[DEBUG] instanceName usado:', inst);
+      console.log('[DEBUG] remoteJid enviado:', jid);
 
       const raw: any[] =
         data?.messages?.records ??

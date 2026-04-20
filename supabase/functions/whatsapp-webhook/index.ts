@@ -5,15 +5,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// ─── Constante: instance_name do número SAC da empresa ───────────────────────
 const SAC_INSTANCE = 'atendente'
 
-// ─── Helper: normaliza nome do evento ───────────────────────────────────
 function normalizeEvent(event: string): string {
   return event?.toUpperCase().replace('.', '_')
 }
 
-// ─── Helper: extrai texto da mensagem ──────────────────────────────────────
 function extrairTextoMensagem(message: any): string {
   if (!message) return '[Mídia]'
   if (message.conversation) return message.conversation
@@ -26,66 +23,52 @@ function extrairTextoMensagem(message: any): string {
   return '[Mídia]'
 }
 
-console.log("EVOLUTION URL", Deno.env.get('EVOLUTION_URL'))
-
-console.log("extrairTextoMensagem", extrairTextoMensagem)
-// ─── Helper: gera link wa.me ──────────────────────────────────────────────────
-function gerarLinkWhatsApp(telefoneCliente: string, nomeCliente: string | null): string {
-  const texto = `Olá${nomeCliente ? ` ${nomeCliente}` : ''}! Sou seu atendente da TFA Viagens. Como posso ajudar?`
-  return `https://wa.me/${telefoneCliente}?text=${encodeURIComponent(texto)}`
+// ── Gera texto de notificação ────────────────────────────────────────────────
+function gerarTextoNotificacao(
+  telefoneCliente: string,
+  nomeCliente: string | null,
+  ultimaMensagem: string
+): string {
+  const nome = nomeCliente || telefoneCliente
+  return `📨 Nova mensagem no SAC TFA Viagens\n\n👤 Cliente: ${nome}\n📞 Telefone: ${telefoneCliente}\n💬 Mensagem: ${ultimaMensagem}\n\nClique para responder via WhatsApp:`
 }
 
-// ─── Helper: envia mensagem via Evolution API ────────────────────────────────
-async function enviarMensagemEvolution(
-  evolutionUrl: string,
-  apiKey: string,
-  instanceName: string,
-  numero: string,
-  texto: string
-): Promise<boolean> {
-  try {
-    const phoneClean = numero.replace('@s.whatsapp.net', '').replace('@g.us', '').replace(/[^0-9]/g, '')
-    console.log(`[Evolution] Enviando mensagem para ${phoneClean} via instância ${instanceName}...`)
-    
-    const res = await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': apiKey },
-      body: JSON.stringify({ number: phoneClean, text: texto }),
-    })
-    
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      console.error(`[Evolution] Erro ao enviar (${res.status}):`, err)
-      return false
-    }
-    
-    console.log(`[Evolution] Mensagem enviada com sucesso para ${phoneClean}`)
-    return true
-  } catch (e) {
-    console.error('[Evolution] Erro de rede:', e)
-    return false
-  }
+// ── Gera link wa.me ──────────────────────────────────────────────────────────
+function gerarLinkWaMe(telefoneCliente: string, texto: string): string {
+  const phoneClean = telefoneCliente.replace(/[^0-9]/g, '')
+  return `https://wa.me/${phoneClean}?text=${encodeURIComponent(texto)}`
 }
 
-// ─── Main handler ─────────────────────────────────────────────────────────────
+console.log('🚀 Serviço whatsapp-webhook iniciado e aguardando requisições...')
+
+// ── Main handler ─────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
   }
 
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
+    // Busca variáveis com prefixo VITE_ pois é assim que estão no seu arquivo .env
+    const supabaseUrl = Deno.env.get('VITE_SUPABASE_URL')
+    const supabaseKey = Deno.env.get('VITE_SUPABASE_ANON_KEY')
 
-    const EVOLUTION_URL = Deno.env.get('EVOLUTION_URL') || 'https://evolution.innovatedigitals.com.br'
-    const EVOLUTION_API_KEY = Deno.env.get('EVOLUTION_API') || ''
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('Supabase URL ou Key não encontrados no ambiente.')
+    }
 
-    const body = await req.json()
-    const event = normalizeEvent(body.event)
-    const instance = body.instance
-    const data = body.data
+    const supabase = createClient(supabaseUrl, supabaseKey)
+
+    let body;
+    try {
+      body = await req.json()
+    } catch (err) {
+      console.log('[Webhook] Requisição recebida sem um JSON válido (Ping ou método inválido).')
+      return new Response('OK', { status: 200 })
+    }
+
+    const event = normalizeEvent(body?.event)
+    const instance = body?.instance
+    const data = body?.data
 
     console.log(`[Webhook] Evento: ${event} | Instância: ${instance}`)
 
@@ -93,12 +76,14 @@ Deno.serve(async (req) => {
       const remoteJid = data?.key?.remoteJid
       const fromMe = data?.key?.fromMe || false
 
+      // Ignora: broadcasts, grupos, mensagens enviadas pelo próprio SAC
       if (!remoteJid || remoteJid === 'status@broadcast' || remoteJid.endsWith('@g.us') || fromMe) {
         return new Response('Ignorado', { status: 200 })
       }
 
+      // Só processa mensagens do SAC principal
       if (instance !== SAC_INSTANCE) {
-        console.log(`[Webhook] Instância ${instance} não é o SAC. Ignorando distribuição.`)
+        console.log(`[Webhook] Instância ${instance} ignorada — não é o SAC.`)
         return new Response('OK', { status: 200 })
       }
 
@@ -108,29 +93,33 @@ Deno.serve(async (req) => {
 
       console.log(`[Webhook] Mensagem de: ${telefone} (${nomeContato}): ${mensagemTexto}`)
 
-      // 1. Busca Configurações do Canal (para pegar a API Key da instância se necessário)
-      const { data: channel } = await supabase
-        .from('whatsapp_channels')
-        .select('*')
-        .eq('instance_name', instance)
-        .maybeSingle()
+      // ── 1. Busca atendentes ONLINE com telefone cadastrado ─────────────────
+      const { data: atendentesOnline, error: atenErr } = await supabase
+        .from('atendentes')
+        .select('id, nome, telefone, status')
+        .eq('status', 'ONLINE')
 
-      const sacApiKey = channel?.api_key || EVOLUTION_API_KEY
+      if (atenErr) console.error('[Webhook] Erro ao buscar atendentes:', atenErr)
 
-      // 2. Localiza ou Cria Lead
+      const atendentesDisponiveis = (atendentesOnline ?? []).filter(
+        (a: any) => a.telefone && a.telefone.trim() !== ''
+      )
+
+      console.log(`[Webhook] Atendentes ONLINE disponíveis: ${atendentesDisponiveis.length}`)
+
+      // ── 2. Localiza ou cria o lead ─────────────────────────────────────────
       let { data: lead } = await supabase
         .from('leads')
         .select('*')
         .eq('telefone', telefone)
         .maybeSingle()
 
-      let isNewLead = false
-
       if (!lead) {
-        console.log('[Webhook] Novo lead detectado. Iniciando round-robin...')
-        isNewLead = true
+        console.log('[Webhook] Novo lead — aplicando round-robin...')
+
+        // Pega próximo atendente da fila (função PostgreSQL existente)
         const { data: atendenteId } = await supabase.rpc('proxima_da_fila')
-        
+
         const { data: novoLead, error: insertError } = await supabase
           .from('leads')
           .insert({
@@ -139,23 +128,30 @@ Deno.serve(async (req) => {
             canal_origem: 'ORGANICO',
             status: atendenteId ? 'EM_ATENDIMENTO' : 'AGUARDANDO',
             atendente_id: atendenteId || null,
-            ultima_mensagem: mensagemTexto
+            ultima_mensagem: mensagemTexto,
           })
           .select()
           .single()
-        
+
         if (insertError) throw insertError
         lead = novoLead
+
+        console.log(`[Webhook] Lead criado: ${lead.id} | Atendente: ${atendenteId ?? 'nenhum'}`)
       } else {
-        // Atualiza última mensagem do lead existente
-        await supabase.from('leads').update({ 
-          ultima_mensagem: mensagemTexto,
-          atualizado_em: new Date().toISOString(),
-          nome: lead.nome || nomeContato // Atualiza nome se estiver vazio
-        }).eq('id', lead.id)
+        // Atualiza lead existente
+        await supabase
+          .from('leads')
+          .update({
+            ultima_mensagem: mensagemTexto,
+            atualizado_em: new Date().toISOString(),
+            nome: lead.nome || nomeContato,
+          })
+          .eq('id', lead.id)
+
+        console.log(`[Webhook] Lead existente atualizado: ${lead.id}`)
       }
 
-      // 3. Salva Mensagem na Tabela
+      // ── 3. Salva mensagem na tabela ────────────────────────────────────────
       await supabase.from('mensagens').insert({
         lead_id: lead.id,
         origem: 'LEAD',
@@ -163,41 +159,32 @@ Deno.serve(async (req) => {
         conteudo: mensagemTexto,
       })
 
-      // 4. Notificações
-      if (lead.atendente_id) {
-        // Busca dados do atendente
-        const { data: atendente } = await supabase
-          .from('atendentes')
-          .select('*')
-          .eq('id', lead.atendente_id)
-          .single()
+      // ── 4. Registra aviso no sistema com os links WA.ME ────────────────────
+      if (atendentesDisponiveis.length > 0) {
+        console.log(`[Webhook] Gerando links wa.me para ${atendentesDisponiveis.length} atendente(s)...`)
 
-        if (atendente) {
-          console.log(`[Webhook] Notificando atendente: ${atendente.nome}`)
-          
-          // Link wa.me para o histórico/painel
-          const linkWaMe = gerarLinkWhatsApp(telefone, nomeContato)
+        const texto = gerarTextoNotificacao(telefone, nomeContato, mensagemTexto)
+        const linkWaMe = gerarLinkWaMe(telefone, texto)
 
-          // A) Registrar Nota de Sistema (Painel)
-          await supabase.from('mensagens').insert({
-            lead_id: lead.id,
-            origem: 'SISTEMA',
-            tipo: 'SISTEMA',
-            conteudo: `🔔 Mensagem recebida de ${nomeContato || telefone}\n📌 Atendente: ${atendente.nome}\n🔗 Link: ${linkWaMe}`
-          })
-
-          // B) Enviar Notificação via WhatsApp para o Atendente
-          if (atendente.telefone) {
-            const msgAtendente = `📨 *Nova mensagem no SAC*\n👤 Cliente: ${nomeContato || telefone}\n💬: ${mensagemTexto}\n\nLink para responder:\n${linkWaMe}`
-            await enviarMensagemEvolution(EVOLUTION_URL, sacApiKey, SAC_INSTANCE, atendente.telefone, msgAtendente)
-          }
-        }
+        // Registra como mensagem de sistema
+        await supabase.from('mensagens').insert({
+          lead_id: lead.id,
+          origem: 'SISTEMA',
+          tipo: 'SISTEMA',
+          conteudo: `🔔 Novo lead na fila!\nDisponível para os atendentes iniciarem contato.\n\n🔗 Clique e responda:\n${linkWaMe}`
+        })
+      } else {
+        console.warn('[Webhook] Nenhum atendente ONLINE com telefone cadastrado.')
+        await supabase.from('mensagens').insert({
+          lead_id: lead.id,
+          origem: 'SISTEMA',
+          tipo: 'SISTEMA',
+          conteudo: `⚠️ Mensagem recebida de ${nomeContato || telefone}, mas nenhum atendente ONLINE.`,
+        })
       }
 
-      // 5. Confirmação ao Cliente (Sempre envia no SAC)
-      console.log(`[Webhook] Enviando confirmação ao cliente: ${telefone}`)
-      const msgCliente = `Olá! Recebemos sua mensagem. Um de nossos atendentes já foi notificado e entrará em contato em breve. 😊`
-      await enviarMensagemEvolution(EVOLUTION_URL, sacApiKey, SAC_INSTANCE, telefone, msgCliente)
+      // ── 5. Retorno ao webhoook (cliente não receberá auto-resposta via evolution) ──
+      console.log(`[Webhook] Concluído para lead ${lead.id}`)
 
       return new Response(JSON.stringify({ ok: true, lead_id: lead.id }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

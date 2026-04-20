@@ -66,76 +66,83 @@ Deno.serve(async (req) => {
     console.log(`[Mirror] action=${action} instance=${resolvedInstance} evoUrl=${evoUrl}`)
 
     // ── GET CHATS (tenta múltiplos endpoints da Evolution API) ────────────────
-    if (action === 'get_chats') {
-      // Busca chats e contatos em paralelo
-      const [chatsRes, contactsRes] = await Promise.all([
-        fetch(`${evoUrl}/chat/findChats/${resolvedInstance}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', apikey: evoKey },
-          body: '{}',
-        }),
-        fetch(`${evoUrl}/contact/findContacts/${resolvedInstance}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', apikey: evoKey },
-          body: '{}',
-        }),
-      ]);
+if (action === 'get_chats') {
+  const [chatsRes, contactsRes] = await Promise.all([
+    fetch(`${evoUrl}/chat/findChats/${resolvedInstance}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: evoKey },
+      body: '{}',
+    }),
+    fetch(`${evoUrl}/contact/findContacts/${resolvedInstance}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: evoKey },
+      body: '{}',
+    }),
+  ]);
 
-      const rawChats = await chatsRes.json().catch(() => []);
-      const rawContacts = await contactsRes.json().catch(() => []);
+  const rawChats = await chatsRes.json().catch(() => []);
+  const rawContacts = await contactsRes.json().catch(() => []);
 
-      // Monta dicionário: remoteJid → nome
-      const contactMap: Record<string, string> = {};
-      const contactList = Array.isArray(rawContacts) ? rawContacts : (rawContacts?.contacts ?? []);
-      for (const c of contactList) {
-        if (c.id) {
-          contactMap[c.id] = c.pushName || c.notify || c.name || '';
-        }
-      }
+  console.log('[Mirror] rawChats[0]:', JSON.stringify(rawChats[0]))
 
-      // Normaliza chats injetando nome do contato
-      const chats = (Array.isArray(rawChats) ? rawChats : []).map((c: any) => {
-        const jid = c.lastMessage?.key?.remoteJid ?? null; // ← usa remoteJid direto, ignora c.id
-        const isGroup = jid?.endsWith('@g.us');
-        const nome =
-          contactMap[jid] ||
-          (!isGroup && c.lastMessage?.pushName && c.lastMessage.pushName !== 'Você'
-            ? c.lastMessage.pushName
-            : null);
+  const contactMap: Record<string, string> = {};
+  const contactList = Array.isArray(rawContacts) ? rawContacts : (rawContacts?.contacts ?? []);
+  for (const c of contactList) {
+    if (c.id) contactMap[c.id] = c.pushName || c.notify || c.name || '';
+  }
 
-        return { ...c, id: jid, contactName: nome };
-      }).filter((c: any) => c.id != null);
+  const chatsRaw = Array.isArray(rawChats) ? rawChats : (rawChats?.chats ?? []);
 
-      return json({ ok: true, chats });
-    }
+  const chats = chatsRaw.map((c: any) => {
+    // ID real do WhatsApp está SEMPRE em lastMessage.key.remoteJid
+    const jid = c.lastMessage?.key?.remoteJid ?? null;
+    const isGroup = jid?.endsWith('@g.us');
+    const nome =
+      (jid && contactMap[jid]) ||
+      (!isGroup && c.lastMessage?.pushName && c.lastMessage.pushName !== 'Você'
+        ? c.lastMessage.pushName
+        : null);
+
+    return {
+      id: jid,           // ← sobrescreve o id interno da Evolution com o JID real
+      contactName: nome,
+      lastMessage: c.lastMessage,
+      unreadCount: c.unreadCount ?? 0,
+    };
+  }).filter((c: any) => c.id != null && c.id !== '');
+
+  return json({ ok: true, chats });
+}
 
     // ── GET MESSAGES ──────────────────────────────────────────────────────────
     if (action === 'get_messages') {
       if (!remoteJid) return json({ ok: false, error: 'remoteJid obrigatório' })
 
       // Tenta os endpoints conhecidos da Evolution por versão
-      const candidatos = [
-        {
-          method: 'POST',
-          url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
-          reqBody: JSON.stringify({ where: { key: { remoteJid } }, limit: 60 }),
-        },
-        {
-          method: 'POST',
-          url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
-          reqBody: JSON.stringify({ remoteJid, limit: 60 }),
-        },
-        {
-          method: 'GET',
-          url: `${evoUrl}/chat/findMessages/${resolvedInstance}?remoteJid=${encodeURIComponent(remoteJid)}`,
-          reqBody: undefined,
-        },
-        {
-          method: 'POST',
-          url: `${evoUrl}/message/findMessages/${resolvedInstance}`,
-          reqBody: JSON.stringify({ where: { key: { remoteJid } }, limit: 60 }),
-        },
-      ]
+ const candidatos = [
+    {
+      method: 'POST',
+      url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
+      // ← estrutura correta que a Evolution v2 aceita
+      reqBody: JSON.stringify({
+        where: { key: { remoteJid } },
+        limit: 60,
+      }),
+    },
+    {
+      method: 'POST',
+      url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
+      reqBody: JSON.stringify({
+        where: { remoteJid },
+        limit: 60,
+      }),
+    },
+    {
+      method: 'POST',
+      url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
+      reqBody: JSON.stringify({ remoteJid, limit: 60 }),
+    },
+  ];
 
       let messages: any[] = []
 
