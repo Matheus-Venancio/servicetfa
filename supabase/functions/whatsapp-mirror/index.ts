@@ -66,86 +66,86 @@ Deno.serve(async (req) => {
     console.log(`[Mirror] action=${action} instance=${resolvedInstance} evoUrl=${evoUrl}`)
 
     // ── GET CHATS (tenta múltiplos endpoints da Evolution API) ────────────────
-if (action === 'get_chats') {
-  const [chatsRes, contactsRes] = await Promise.all([
-    fetch(`${evoUrl}/chat/findChats/${resolvedInstance}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: evoKey },
-      body: '{}',
-    }),
-    fetch(`${evoUrl}/contact/findContacts/${resolvedInstance}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: evoKey },
-      body: '{}',
-    }),
-  ]);
+    if (action === 'get_chats') {
+      const [chatsRes, contactsRes] = await Promise.all([
+        fetch(`${evoUrl}/chat/findChats/${resolvedInstance}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: evoKey },
+          body: '{}',
+        }),
+        fetch(`${evoUrl}/contact/findContacts/${resolvedInstance}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: evoKey },
+          body: '{}',
+        }),
+      ]);
 
-  const rawChats = await chatsRes.json().catch(() => []);
-  const rawContacts = await contactsRes.json().catch(() => []);
+      const rawChats = await chatsRes.json().catch(() => []);
+      const rawContacts = await contactsRes.json().catch(() => []);
 
-  console.log('[Mirror] rawChats[0]:', JSON.stringify(rawChats[0]))
+      console.log('[Mirror] rawChats[0]:', JSON.stringify(rawChats[0]))
 
-  const contactMap: Record<string, string> = {};
-  const contactList = Array.isArray(rawContacts) ? rawContacts : (rawContacts?.contacts ?? []);
-  for (const c of contactList) {
-    if (c.id) contactMap[c.id] = c.pushName || c.notify || c.name || '';
-  }
+      const contactMap: Record<string, string> = {};
+      const contactList = Array.isArray(rawContacts) ? rawContacts : (rawContacts?.contacts ?? []);
+      for (const c of contactList) {
+        if (c.id) contactMap[c.id] = c.pushName || c.notify || c.name || '';
+      }
 
-  const chatsRaw = Array.isArray(rawChats) ? rawChats : (rawChats?.chats ?? []);
+      const chatsRaw = Array.isArray(rawChats) ? rawChats : (rawChats?.chats ?? []);
 
-  const chats = chatsRaw.map((c: any) => {
-    // ID real do WhatsApp está SEMPRE em lastMessage.key.remoteJid
-    const jid = c.lastMessage?.key?.remoteJid ?? null;
-    console.log("JID Aqui no teste", jid)
-    const isGroup = jid?.endsWith('@g.us');
-    console.log("IsGroup aqui no teste", isGroup)
-    const nome =
-      (jid && contactMap[jid]) ||
-      (!isGroup && c.lastMessage?.pushName && c.lastMessage.pushName !== 'Você'
-        ? c.lastMessage.pushName
-        : null);
-    console.log("Nome aqui no teste", nome)
+      const chats = chatsRaw.map((c: any) => {
+        // ID real do WhatsApp está SEMPRE em lastMessage.key.remoteJid
+        const jid = c.lastMessage?.key?.remoteJid ?? null;
+        console.log("JID Aqui no teste", jid)
+        const isGroup = jid?.endsWith('@g.us');
+        console.log("IsGroup aqui no teste", isGroup)
+        const nome =
+          (jid && contactMap[jid]) ||
+          (!isGroup && c.lastMessage?.pushName && c.lastMessage.pushName !== 'Você'
+            ? c.lastMessage.pushName
+            : null);
+        console.log("Nome aqui no teste", nome)
 
-    return {
-      id: jid,           // ← sobrescreve o id interno da Evolution com o JID real
-      contactName: nome,
-      lastMessage: c.lastMessage,
-      unreadCount: c.unreadCount ?? 0,
-    };
-  }).filter((c: any) => c.id != null && c.id !== '');
+        return {
+          id: jid,           // ← sobrescreve o id interno da Evolution com o JID real
+          contactName: nome,
+          lastMessage: c.lastMessage,
+          unreadCount: c.unreadCount ?? 0,
+        };
+      }).filter((c: any) => c.id != null && c.id !== '');
 
-  return json({ ok: true, chats });
-}
+      return json({ ok: true, chats });
+    }
 
     // ── GET MESSAGES ──────────────────────────────────────────────────────────
     if (action === 'get_messages') {
       if (!remoteJid) return json({ ok: false, error: 'remoteJid obrigatório' })
 
       // Tenta os endpoints conhecidos da Evolution por versão
- const candidatos = [
-    {
-      method: 'POST',
-      url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
-      // ← estrutura correta que a Evolution v2 aceita
-      reqBody: JSON.stringify({
-        where: { key: { remoteJid } },
-        limit: 60,
-      }),
-    },
-    {
-      method: 'POST',
-      url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
-      reqBody: JSON.stringify({
-        where: { remoteJid },
-        limit: 60,
-      }),
-    },
-    {
-      method: 'POST',
-      url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
-      reqBody: JSON.stringify({ remoteJid, limit: 60 }),
-    },
-  ];
+      const candidatos = [
+        {
+          method: 'POST',
+          url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
+          // ← estrutura correta que a Evolution v2 aceita
+          reqBody: JSON.stringify({
+            where: { key: { remoteJid } },
+            limit: 60,
+          }),
+        },
+        {
+          method: 'POST',
+          url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
+          reqBody: JSON.stringify({
+            where: { remoteJid },
+            limit: 60,
+          }),
+        },
+        {
+          method: 'POST',
+          url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
+          reqBody: JSON.stringify({ remoteJid, limit: 60 }),
+        },
+      ];
 
       let messages: any[] = []
 
@@ -208,6 +208,26 @@ if (action === 'get_chats') {
       }
 
       return json({ ok: true, result: raw })
+    }
+
+    if (action === 'delete_message') {
+      const { messageKeyId, remoteJid: delJid } = body;
+      if (!messageKeyId || !delJid) return json({ ok: false, error: 'messageKeyId e remoteJid obrigatórios' });
+
+      const res = await fetch(`${evoUrl}/chat/deleteMessageForEveryone/${resolvedInstance}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', apikey: evoKey },
+        body: JSON.stringify({
+          id: messageKeyId,
+          remoteJid: delJid,
+          fromMe: true,
+        }),
+      });
+
+      const raw = await res.json().catch(() => ({}));
+      console.log(`[Mirror] delete_message → ${res.status}`, raw);
+      if (!res.ok) return json({ ok: false, error: raw?.message ?? `Erro ${res.status}` });
+      return json({ ok: true });
     }
 
     // ── DEBUG — mostra configuração ───────────────────────────────────────────

@@ -305,6 +305,24 @@ export default function AtendenteConversasPage() {
     fetchChats(inst);
   };
 
+  const handleDeleteMessage = async (msg: EvoMessage) => {
+    if (!msg.key.fromMe) return;
+    if (!confirm('Apagar esta mensagem?')) return;
+
+    try {
+      await callMirror({
+        action: 'delete_message',
+        instanceName: instanceNameRef.current,
+        messageKeyId: msg.key.id,        // ← era messageId, agora messageKeyId
+        remoteJid: msg.key.remoteJid,
+      });
+      setMessages(prev => prev.filter(m => m.key.id !== msg.key.id));
+      toast.success('Mensagem apagada.');
+    } catch (e: any) {
+      toast.error('Erro ao apagar: ' + e.message);
+    }
+  };
+
   // ── Agrupamento por data ──────────────────────────────────────────────────
   const groupedMessages = (() => {
     const groups: { date: string; msgs: EvoMessage[] }[] = [];
@@ -574,18 +592,30 @@ export default function AtendenteConversasPage() {
                     const hora = formatarHora(msg.messageTimestamp);
                     const uniqueKey = msg.key?.id ?? `${msg.messageTimestamp}-${idx}`;
                     return (
-                      <div key={uniqueKey} className={`flex mb-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[80%] rounded-lg px-3 py-1.5 shadow-sm ${isMine
-                          ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none'
-                          : 'bg-white text-[#111b21] rounded-bl-none'
-                          }`}>
-                          {!isMine && msg.pushName && (
-                            <p className="text-xs font-semibold text-primary mb-0.5">{msg.pushName}</p>
+                      <div key={uniqueKey} className={`flex mb-1 group ${isMine ? 'justify-end' : 'justify-start'}`}>
+                        <div className="relative">
+                          {/* Botão apagar — só aparece no hover de mensagens minhas */}
+                          {isMine && (
+                            <button
+                              onClick={() => handleDeleteMessage(msg)}
+                              className="absolute -left-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full hover:bg-black/10"
+                              title="Apagar mensagem"
+                            >
+                              <span style={{ fontSize: 14, color: '#54656f' }}>🗑</span>
+                            </button>
                           )}
-                          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{texto}</p>
-                          <div className={`flex items-center gap-1 mt-0.5 ${isMine ? 'justify-end' : 'justify-start'}`}>
-                            <span className="text-[10px] text-[#54656f]">{hora}</span>
-                            {isMine && <CheckCheck className="h-3 w-3 text-[#53bdeb]" />}
+                          <div className={`max-w-[80%] rounded-lg px-3 py-1.5 shadow-sm ${isMine
+                            ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none'
+                            : 'bg-white text-[#111b21] rounded-bl-none'
+                            }`}>
+                            {!isMine && msg.pushName && (
+                              <p className="text-xs font-semibold text-primary mb-0.5">{msg.pushName}</p>
+                            )}
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{texto}</p>
+                            <div className={`flex items-center gap-1 mt-0.5 ${isMine ? 'justify-end' : 'justify-start'}`}>
+                              <span className="text-[10px] text-[#54656f]">{hora}</span>
+                              {isMine && <CheckCheck className="h-3 w-3 text-[#53bdeb]" />}
+                            </div>
                           </div>
                         </div>
                       </div>
