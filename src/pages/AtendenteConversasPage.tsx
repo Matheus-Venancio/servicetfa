@@ -111,7 +111,7 @@ export default function AtendenteConversasPage() {
   const [instanceName, setInstanceName] = useState<string>('');
   const [loadingSetup, setLoadingSetup] = useState(true);
   const [setupError, setSetupError] = useState<string | null>(null);
-
+  const contactNamesCache = useRef<Record<string, string>>({});
   const [chats, setChats] = useState<EvoChat[]>([]);
   const [loadingChats, setLoadingChats] = useState(false);
   const [chatsError, setChatsError] = useState<string | null>(null);
@@ -204,7 +204,11 @@ export default function AtendenteConversasPage() {
 
     try {
       const data = await callMirror({ action: 'get_chats', instanceName: iName, atendenteId });
-      const lista: EvoChat[] = (data.chats ?? []);
+      const lista: EvoChat[] = (data.chats ?? []).map((c: EvoChat) => ({
+        ...c,
+        // Restaura nome do cache se a edge function não trouxe
+        contactName: c.contactName || contactNamesCache.current[c.id] || null,
+      }));
       console.log("LISTA DE CONVERSAS", lista)
       lista.sort((a, b) => (b.lastMessage?.messageTimestamp ?? 0) - (a.lastMessage?.messageTimestamp ?? 0));
       setChats(lista);
@@ -259,6 +263,19 @@ export default function AtendenteConversasPage() {
         });
 
       lista.sort((a, b) => (a.messageTimestamp ?? 0) - (b.messageTimestamp ?? 0));
+      const msgDoContato = lista.find(m => !m.key.fromMe && m.pushName && !/^\d+$/.test(m.pushName));
+      if (msgDoContato?.pushName && selectedJid) {
+        contactNamesCache.current[selectedJid] = msgDoContato.pushName;
+        // Atualiza o nome no chat selecionado
+        setSelectedName(msgDoContato.pushName);
+        // Atualiza a lista de chats com o nome real
+        setChats(prev => prev.map(c =>
+          c.id === selectedJid && !c.contactName
+            ? { ...c, contactName: msgDoContato.pushName }
+            : c
+        ));
+      }
+
       setMessages(lista);
       console.log('[Mirror] mensagens processadas:', lista.length);
     } catch (e: any) {

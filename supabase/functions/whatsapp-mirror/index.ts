@@ -93,29 +93,73 @@ Deno.serve(async (req) => {
 
       const chatsRaw = Array.isArray(rawChats) ? rawChats : (rawChats?.chats ?? []);
 
-      const chats = chatsRaw.map((c: any) => {
-        // ID real do WhatsApp está SEMPRE em lastMessage.key.remoteJid
-        const jid = c.lastMessage?.key?.remoteJid ?? null;
-        console.log("JID Aqui no teste", jid)
-        const isGroup = jid?.endsWith('@g.us');
-        console.log("IsGroup aqui no teste", isGroup)
-        const nome =
-          (jid && contactMap[jid]) ||
-          (!isGroup && c.lastMessage?.pushName && c.lastMessage.pushName !== 'Você'
-            ? c.lastMessage.pushName
-            : null);
-        console.log("Nome aqui no teste", nome)
+      // Mapeia usando os campos corretos do findChats v2.3.7
+      const mapped = chatsRaw.map((c: any) => {
+        const jidOriginal = c.remoteJid ?? null;
+        const jidAlt = c.lastMessage?.key?.remoteJidAlt ?? null;
+        const isLid = jidOriginal?.endsWith('@lid');
+        const isGroup = jidOriginal?.endsWith('@g.us');
+
+        // ← Se for @lid e tiver remoteJidAlt, usa o número real como id
+        const jid = (isLid && jidAlt) ? jidAlt : jidOriginal;
+
+        // Nome: pushName do chat, ou da mensagem recebida
+        const pushNameChat = c.pushName;
+        const pushNameMsg = c.lastMessage?.pushName !== 'Você' ? c.lastMessage?.pushName : null;
+        const pushNameFinal = pushNameChat || pushNameMsg;
+        const nomeValido = pushNameFinal &&
+          !/^\d+$/.test(pushNameFinal) &&
+          !pushNameFinal.includes('@');
+
+        // Número limpo para deduplicação
+        const phoneNumber = jid?.replace('@s.whatsapp.net', '') ?? null;
 
         return {
-          id: jid,           // ← sobrescreve o id interno da Evolution com o JID real
-          contactName: nome,
+          id: jid,                                          // ← agora usa número real
+          phoneNumber: isGroup ? null : phoneNumber,
+          isLid: false,                                     // ← já resolvido acima
+          contactName: nomeValido ? pushNameFinal : null,
           lastMessage: c.lastMessage,
           unreadCount: c.unreadCount ?? 0,
+          profilePicUrl: c.profilePicUrl ?? null,
         };
       }).filter((c: any) => c.id != null && c.id !== '');
 
+      // Deduplica por número — mantém @s.whatsapp.net, descarta @lid duplicado
+      const phoneMap: Record<string, any> = {};
+
+      for (const c of mapped) {
+        if (!c.phoneNumber) {
+          phoneMap[c.id] = c; // grupos e sem número: mantém pelo id
+          continue;
+        }
+
+        const existing = phoneMap[c.phoneNumber];
+        if (!existing) {
+          phoneMap[c.phoneNumber] = c;
+        } else {
+          // Prefere @s.whatsapp.net sobre @lid
+          const preferCurrent = !c.isLid && existing.isLid;
+          const preferExisting = c.isLid && !existing.isLid;
+          const currentNewer = (c.lastMessage?.messageTimestamp ?? 0) > (existing.lastMessage?.messageTimestamp ?? 0);
+
+          if (preferCurrent) {
+            phoneMap[c.phoneNumber] = { ...c, contactName: c.contactName || existing.contactName };
+          } else if (!preferExisting && currentNewer) {
+            phoneMap[c.phoneNumber] = { ...c, contactName: c.contactName || existing.contactName };
+          } else {
+            // Mantém existing mas pega nome se não tinha
+            if (!existing.contactName && c.contactName) {
+              phoneMap[c.phoneNumber].contactName = c.contactName;
+            }
+          }
+        }
+      }
+
+      const chats = Object.values(phoneMap);
       return json({ ok: true, chats });
-    }
+    };
+
 
     // ── GET MESSAGES ──────────────────────────────────────────────────────────
     if (action === 'get_messages') {
@@ -293,26 +337,26 @@ Deno.serve(async (req) => {
       return json({ ok: true, result: raw });
     }
 
-if (action === 'get_media') {
-  const { messageId, mediaType } = body;
-  if (!messageId) return json({ ok: false, error: 'messageId obrigatório' });
+    if (action === 'get_media') {
+      const { messageId, mediaType } = body;
+      if (!messageId) return json({ ok: false, error: 'messageId obrigatório' });
 
-  const isAudio = mediaType === 'audioMessage';
+      const isAudio = mediaType === 'audioMessage';
 
-  const res = await fetch(`${evoUrl}/chat/getBase64FromMediaMessage/${resolvedInstance}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', apikey: evoKey },
-    body: JSON.stringify({
-      message: { key: { id: messageId } },
-      convertToMp4: isAudio, // ← converte áudio para mp4/aac que o browser suporta
-    }),
-  });
+      const res = await fetch(`${evoUrl}/chat/getBase64FromMediaMessage/${resolvedInstance}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: evoKey },
+        body: JSON.stringify({
+          message: { key: { id: messageId } },
+          convertToMp4: isAudio, // ← converte áudio para mp4/aac que o browser suporta
+        }),
+      });
 
-  const raw = await res.json().catch(() => ({}));
-  if (!res.ok) return json({ ok: false, error: raw?.message ?? `Erro ${res.status}` });
+      const raw = await res.json().catch(() => ({}));
+      if (!res.ok) return json({ ok: false, error: raw?.message ?? `Erro ${res.status}` });
 
-  return json({ ok: true, base64: raw.base64, mimetype: raw.mimetype, fileName: raw.fileName });
-}
+      return json({ ok: true, base64: raw.base64, mimetype: raw.mimetype, fileName: raw.fileName });
+    }
 
     // ── DEBUG — mostra configuração ───────────────────────────────────────────
     if (action === 'debug') {
