@@ -230,6 +230,26 @@ Deno.serve(async (req) => {
       return json({ ok: true });
     }
 
+    if (action === 'edit_message') {
+      const { messageKeyId, remoteJid: editJid, newText, number } = body;
+      if (!messageKeyId || !editJid || !newText) return json({ ok: false, error: 'messageKeyId, remoteJid e newText obrigatórios' });
+
+      const res = await fetch(`${evoUrl}/chat/updateMessage/${resolvedInstance}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: evoKey },
+        body: JSON.stringify({
+          number: number,
+          key: { id: messageKeyId, fromMe: true, remoteJid: editJid },
+          text: newText,
+        }),
+      });
+
+      const raw = await res.json().catch(() => ({}));
+      console.log(`[Mirror] edit_message → ${res.status}`, raw);
+      if (!res.ok) return json({ ok: false, error: raw?.message ?? `Erro ${res.status}` });
+      return json({ ok: true });
+    }
+
     // ── DEBUG — mostra configuração ───────────────────────────────────────────
     if (action === 'debug') {
       return json({

@@ -108,6 +108,8 @@ export default function AtendenteConversasPage() {
   const [selectedJid, setSelectedJid] = useState<string | null>(null);
   const [selectedName, setSelectedName] = useState('');
   const [messages, setMessages] = useState<EvoMessage[]>([]);
+  const [editingMsg, setEditingMsg] = useState<EvoMessage | null>(null);
+  const [editText, setEditText] = useState('');
   const [loadingMsgs, setLoadingMsgs] = useState(false);
 
   const [input, setInput] = useState('');
@@ -303,6 +305,31 @@ export default function AtendenteConversasPage() {
     setInstanceName(inst);
     toast.success(`Instância "${inst}" vinculada. Buscando conversas...`);
     fetchChats(inst);
+  };
+
+  const handleEditMessage = async () => {
+    if (!editingMsg || !editText.trim()) return;
+    try {
+      await callMirror({
+        action: 'edit_message',
+        instanceName: instanceNameRef.current,
+        messageKeyId: editingMsg.key.id,
+        remoteJid: editingMsg.key.remoteJid,
+        number: phoneLabel(editingMsg.key.remoteJid),
+        newText: editText.trim(),
+      });
+      // Atualiza localmente
+      setMessages(prev => prev.map(m =>
+        m.key.id === editingMsg.key.id
+          ? { ...m, message: { conversation: editText.trim() } }
+          : m
+      ));
+      toast.success('Mensagem editada.');
+      setEditingMsg(null);
+      setEditText('');
+    } catch (e: any) {
+      toast.error('Erro ao editar: ' + e.message);
+    }
   };
 
   const handleDeleteMessage = async (msg: EvoMessage) => {
@@ -595,14 +622,24 @@ export default function AtendenteConversasPage() {
                       <div key={uniqueKey} className={`flex mb-1 group ${isMine ? 'justify-end' : 'justify-start'}`}>
                         <div className="relative">
                           {/* Botão apagar — só aparece no hover de mensagens minhas */}
+                          {/* Botões hover — só em mensagens minhas */}
                           {isMine && (
-                            <button
-                              onClick={() => handleDeleteMessage(msg)}
-                              className="absolute -left-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full hover:bg-black/10"
-                              title="Apagar mensagem"
-                            >
-                              <span style={{ fontSize: 14, color: '#54656f' }}>🗑</span>
-                            </button>
+                            <>
+                              <button
+                                onClick={() => { setEditingMsg(msg); setEditText(extrairTexto(msg.message)); }}
+                                className="absolute -left-12 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full hover:bg-black/10"
+                                title="Editar mensagem"
+                              >
+                                <span style={{ fontSize: 14, color: '#54656f' }}>✏️</span>
+                              </button>
+                              <button
+                                onClick={() => handleDeleteMessage(msg)}
+                                className="absolute -left-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full hover:bg-black/10"
+                                title="Apagar mensagem"
+                              >
+                                <span style={{ fontSize: 14, color: '#54656f' }}>🗑</span>
+                              </button>
+                            </>
                           )}
                           <div className={`max-w-[80%] rounded-lg px-3 py-1.5 shadow-sm ${isMine
                             ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none'
@@ -664,6 +701,38 @@ export default function AtendenteConversasPage() {
               </div>
             </div>
           </div>
+          {editingMsg && (
+            <div className="absolute inset-0 z-20 flex items-end justify-center pb-4 px-4"
+              style={{ backgroundColor: 'rgba(0,0,0,0.3)' }}
+              onClick={(e) => { if (e.target === e.currentTarget) { setEditingMsg(null); setEditText(''); } }}
+            >
+              <div className="bg-white rounded-2xl shadow-xl w-full p-4 flex flex-col gap-3">
+                <p className="text-xs text-[#54656f] font-medium">Editar mensagem</p>
+                <textarea
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  className="w-full resize-none text-sm text-[#111b21] border border-gray-200 rounded-lg px-3 py-2 outline-none min-h-[60px]"
+                  autoFocus
+                />
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => { setEditingMsg(null); setEditText(''); }}
+                    className="px-4 py-1.5 text-sm text-[#54656f] border border-gray-200 rounded-lg hover:bg-gray-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleEditMessage}
+                    disabled={!editText.trim()}
+                    className="px-4 py-1.5 text-sm text-white rounded-lg disabled:opacity-40"
+                    style={{ backgroundColor: '#075e54' }}
+                  >
+                    Salvar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
