@@ -96,12 +96,15 @@ if (action === 'get_chats') {
   const chats = chatsRaw.map((c: any) => {
     // ID real do WhatsApp está SEMPRE em lastMessage.key.remoteJid
     const jid = c.lastMessage?.key?.remoteJid ?? null;
+    console.log("JID Aqui no teste", jid)
     const isGroup = jid?.endsWith('@g.us');
+    console.log("IsGroup aqui no teste", isGroup)
     const nome =
       (jid && contactMap[jid]) ||
       (!isGroup && c.lastMessage?.pushName && c.lastMessage.pushName !== 'Você'
         ? c.lastMessage.pushName
         : null);
+    console.log("Nome aqui no teste", nome)
 
     return {
       id: jid,           // ← sobrescreve o id interno da Evolution com o JID real
