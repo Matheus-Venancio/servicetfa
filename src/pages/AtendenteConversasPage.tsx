@@ -190,6 +190,11 @@ export default function AtendenteConversasPage() {
   const [editingMsg, setEditingMsg] = useState<EvoMessage | null>(null);
   const [editText, setEditText] = useState('');
   const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachFile, setAttachFile] = useState<File | null>(null);
   const [attachPreview, setAttachPreview] = useState<string | null>(null);
@@ -477,6 +482,88 @@ export default function AtendenteConversasPage() {
     // Reseta o input para permitir selecionar o mesmo arquivo novamente
     e.target.value = '';
   };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.start();
+      mediaRecorderRef.current = mediaRecorder;
+      setIsRecording(true);
+      setRecordingSeconds(0);
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds(s => s + 1);
+      }, 1000);
+    } catch (e) {
+      toast.error('Permissão de microfone negada.');
+    }
+  };
+
+  const stopRecording = () => {
+    return new Promise<string>((resolve) => {
+      const mediaRecorder = mediaRecorderRef.current;
+      if (!mediaRecorder) return resolve('');
+
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64 = (reader.result as string).split(',')[1];
+          resolve(base64);
+        };
+        reader.readAsDataURL(blob);
+
+        // Para todas as tracks do microfone
+        mediaRecorder.stream.getTracks().forEach(t => t.stop());
+      };
+
+      mediaRecorder.stop();
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      setIsRecording(false);
+      setRecordingSeconds(0);
+    });
+  };
+
+  const handleAudioSend = async () => {
+    const base64 = await stopRecording();
+    if (!base64 || !selectedJid) return;
+    setSending(true);
+    try {
+      await callMirror({
+        action: 'send_audio',
+        instanceName: instanceNameRef.current,
+        number: phoneLabel(selectedJid),
+        audioBase64: base64,
+      });
+      setTimeout(() => fetchMessages(selectedJid), 1500);
+      toast.success('Áudio enviado.');
+    } catch (e: any) {
+      toast.error('Erro ao enviar áudio: ' + e.message);
+    }
+    setSending(false);
+  };
+
+  const cancelRecording = () => {
+    const mediaRecorder = mediaRecorderRef.current;
+    if (mediaRecorder) {
+      mediaRecorder.stream.getTracks().forEach(t => t.stop());
+      mediaRecorder.stop();
+    }
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    audioChunksRef.current = [];
+    setIsRecording(false);
+    setRecordingSeconds(0);
+  };
+
+  const formatRecordingTime = (s: number) =>
+    `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
   // ── Agrupamento por data ──────────────────────────────────────────────────
   const groupedMessages = (() => {
@@ -770,8 +857,8 @@ export default function AtendenteConversasPage() {
                             </>
                           )}
                           <div className={`max-w-[80%] rounded-lg px-3 py-1.5 shadow-sm ${isMine
-                              ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none'
-                              : 'bg-white text-[#111b21] rounded-bl-none'
+                            ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none'
+                            : 'bg-white text-[#111b21] rounded-bl-none'
                             }`}>
                             {!isMine && msg.pushName && (
                               <p className="text-xs font-semibold text-primary mb-0.5">{msg.pushName}</p>
@@ -808,9 +895,7 @@ export default function AtendenteConversasPage() {
             </div>
 
             {/* Composer */}
-            {/* Composer */}
             <div className="px-3 py-2 shrink-0" style={{ backgroundColor: '#f0f2f5' }}>
-              {/* Preview do arquivo selecionado */}
               {attachPreview && (
                 <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 mb-2 shadow-sm">
                   <div className="flex-1 min-w-0">
@@ -828,46 +913,78 @@ export default function AtendenteConversasPage() {
               )}
 
               <div className="flex items-end gap-2">
-                {/* Botão de anexo */}
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 hover:bg-black/5 transition-colors"
-                  title="Anexar arquivo"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#54656f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                  </svg>
-                </button>
+                {isRecording ? (
+                  // ── Modo gravação ──
+                  <>
+                    <button onClick={cancelRecording}
+                      className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 hover:bg-black/5"
+                      title="Cancelar">
+                      <span style={{ fontSize: 20, color: '#e53e3e' }}>×</span>
+                    </button>
 
-                {/* Input de arquivo oculto — aceita imagem e documento */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
-                  className="hidden"
-                  onChange={handleFileSelect}
-                />
+                    <div className="flex-1 bg-white rounded-2xl px-4 py-2 shadow-sm flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse shrink-0" />
+                      <span className="text-sm text-[#111b21] font-mono">{formatRecordingTime(recordingSeconds)}</span>
+                      <span className="text-xs text-[#54656f]">Gravando...</span>
+                    </div>
 
-                <div className="flex-1 bg-white rounded-2xl px-4 py-2 shadow-sm">
-                  <textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder={attachFile ? 'Adicione uma legenda...' : 'Digite uma mensagem...'}
-                    className="w-full resize-none bg-transparent text-sm text-[#111b21] placeholder:text-[#8696a0] outline-none min-h-[20px] max-h-[80px]"
-                    rows={1}
-                  />
-                </div>
+                    <button onClick={handleAudioSend} disabled={sending}
+                      className="h-10 w-10 rounded-full flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: '#075e54' }}
+                      title="Enviar áudio">
+                      {sending
+                        ? <Loader2 className="h-4 w-4 animate-spin text-white" />
+                        : <Send className="h-4 w-4 text-white" />}
+                    </button>
+                  </>
+                ) : (
+                  // ── Modo normal ──
+                  <>
+                    <button onClick={() => fileInputRef.current?.click()}
+                      className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 hover:bg-black/5 transition-colors"
+                      title="Anexar arquivo">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#54656f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                      </svg>
+                    </button>
 
-                <Button
-                  onClick={handleSend}
-                  size="icon"
-                  disabled={(!input.trim() && !attachFile) || sending}
-                  className="h-10 w-10 rounded-full shrink-0"
-                  style={{ backgroundColor: '#075e54' }}
-                >
-                  {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                </Button>
+                    <input ref={fileInputRef} type="file"
+                      accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
+                      className="hidden" onChange={handleFileSelect} />
+
+                    <div className="flex-1 bg-white rounded-2xl px-4 py-2 shadow-sm">
+                      <textarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder={attachFile ? 'Adicione uma legenda...' : 'Digite uma mensagem...'}
+                        className="w-full resize-none bg-transparent text-sm text-[#111b21] placeholder:text-[#8696a0] outline-none min-h-[20px] max-h-[80px]"
+                        rows={1}
+                      />
+                    </div>
+
+                    {/* Microfone ou Enviar */}
+                    {input.trim() || attachFile ? (
+                      <Button onClick={handleSend} size="icon"
+                        disabled={(!input.trim() && !attachFile) || sending}
+                        className="h-10 w-10 rounded-full shrink-0"
+                        style={{ backgroundColor: '#075e54' }}>
+                        {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      </Button>
+                    ) : (
+                      <button onClick={startRecording}
+                        className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 hover:bg-black/5 transition-colors"
+                        title="Gravar áudio">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#54656f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                          <line x1="12" y1="19" x2="12" y2="23" />
+                          <line x1="8" y1="23" x2="16" y2="23" />
+                        </svg>
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           </div>

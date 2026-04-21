@@ -273,6 +273,26 @@ Deno.serve(async (req) => {
       return json({ ok: true, result: raw });
     }
 
+    if (action === 'send_audio') {
+      const { number, audioBase64 } = body;
+      if (!number || !audioBase64) return json({ ok: false, error: 'number e audioBase64 obrigatórios' });
+
+      const res = await fetch(`${evoUrl}/message/sendWhatsAppAudio/${resolvedInstance}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: evoKey },
+        body: JSON.stringify({
+          number,
+          audio: audioBase64,
+          encoding: true,
+        }),
+      });
+
+      const raw = await res.json().catch(() => ({}));
+      console.log(`[Mirror] send_audio → ${res.status}`);
+      if (!res.ok) return json({ ok: false, error: raw?.message ?? `Erro ${res.status}` });
+      return json({ ok: true, result: raw });
+    }
+
     // ── DEBUG — mostra configuração ───────────────────────────────────────────
     if (action === 'debug') {
       return json({
