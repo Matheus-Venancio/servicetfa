@@ -250,6 +250,29 @@ Deno.serve(async (req) => {
       return json({ ok: true });
     }
 
+    if (action === 'send_media') {
+      const { number, mediatype, mimetype, fileName, caption, mediaBase64 } = body;
+      if (!number || !mediaBase64 || !mediatype) return json({ ok: false, error: 'number, mediaBase64 e mediatype obrigatórios' });
+
+      const res = await fetch(`${evoUrl}/message/sendMedia/${resolvedInstance}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: evoKey },
+        body: JSON.stringify({
+          number,
+          mediatype,
+          mimetype,
+          media: mediaBase64,
+          fileName: fileName || 'arquivo',
+          caption: caption || '',
+        }),
+      });
+
+      const raw = await res.json().catch(() => ({}));
+      console.log(`[Mirror] send_media → ${res.status}`, JSON.stringify(raw).slice(0, 200));
+      if (!res.ok) return json({ ok: false, error: raw?.message ?? `Erro ${res.status}` });
+      return json({ ok: true, result: raw });
+    }
+
     // ── DEBUG — mostra configuração ───────────────────────────────────────────
     if (action === 'debug') {
       return json({

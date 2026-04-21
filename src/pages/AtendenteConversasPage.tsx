@@ -33,10 +33,15 @@ interface EvoMessage {
   message?: {
     conversation?: string;
     extendedTextMessage?: { text: string };
-    imageMessage?: { caption?: string };
+    imageMessage?: { caption?: string; url?: string; jpegThumbnail?: string };
+    documentMessage?: { caption?: string; fileName?: string; url?: string };
+    videoMessage?: { caption?: string; url?: string };
+    audioMessage?: { url?: string };
+    stickerMessage?: { url?: string };
   };
   messageTimestamp?: number;
   pushName?: string;
+  messageType?: string;
 }
 
 interface Atendente {
@@ -58,7 +63,81 @@ interface Channel {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function extrairTexto(msg?: EvoMessage['message']): string {
   if (!msg) return '[Mídia]';
-  return msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || '[Mídia]';
+  if (msg.imageMessage) return msg.imageMessage.caption || '📷 Imagem';
+  if (msg.documentMessage) return `📄 ${msg.documentMessage.fileName || 'Documento'}`;
+  if (msg.videoMessage) return msg.videoMessage.caption || '🎥 Vídeo';
+  if (msg.audioMessage) return '🎵 Áudio';
+  if (msg.stickerMessage) return '[Figurinha]';
+  return msg.conversation || msg.extendedTextMessage?.text || '[Mídia]';
+}
+
+function MsgConteudo({ msg }: { msg: EvoMessage }) {
+  const m = msg.message;
+  if (!m) return <span className="text-sm italic text-[#8696a0]">[Mídia]</span>;
+
+  // Imagem — mostra thumbnail base64 ou placeholder
+  if (m.imageMessage) {
+    const thumb = m.imageMessage.jpegThumbnail
+      ? `data:image/jpeg;base64,${m.imageMessage.jpegThumbnail}`
+      : null;
+    return (
+      <div className="flex flex-col gap-1">
+        {thumb
+          ? <img src={thumb} className="rounded-lg max-w-[220px] max-h-[200px] object-cover" />
+          : <div className="rounded-lg bg-black/10 flex items-center justify-center" style={{ width: 180, height: 120 }}>
+            <span style={{ fontSize: 32 }}>🖼️</span>
+          </div>
+        }
+        {m.imageMessage.caption && (
+          <p className="text-sm whitespace-pre-wrap break-words">{m.imageMessage.caption}</p>
+        )}
+      </div>
+    );
+  }
+
+  // Documento
+  if (m.documentMessage) {
+    return (
+      <div className="flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2 min-w-[160px]">
+        <span style={{ fontSize: 24 }}>📄</span>
+        <div className="min-w-0">
+          <p className="text-sm font-medium truncate">{m.documentMessage.fileName || 'Documento'}</p>
+          {m.documentMessage.caption && (
+            <p className="text-xs text-[#54656f] truncate">{m.documentMessage.caption}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Vídeo
+  if (m.videoMessage) {
+    return (
+      <div className="flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2">
+        <span style={{ fontSize: 24 }}>🎥</span>
+        <p className="text-sm">{m.videoMessage.caption || 'Vídeo'}</p>
+      </div>
+    );
+  }
+
+  // Áudio
+  if (m.audioMessage) {
+    return (
+      <div className="flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2">
+        <span style={{ fontSize: 24 }}>🎵</span>
+        <p className="text-sm">Áudio</p>
+      </div>
+    );
+  }
+
+  // Sticker
+  if (m.stickerMessage) {
+    return <span className="text-sm italic text-[#8696a0]">[Figurinha]</span>;
+  }
+
+  // Texto normal
+  const texto = m.conversation || m.extendedTextMessage?.text || '';
+  return <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{texto}</p>;
 }
 
 function formatarHora(ts?: number): string {
@@ -111,6 +190,9 @@ export default function AtendenteConversasPage() {
   const [editingMsg, setEditingMsg] = useState<EvoMessage | null>(null);
   const [editText, setEditText] = useState('');
   const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachFile, setAttachFile] = useState<File | null>(null);
+  const [attachPreview, setAttachPreview] = useState<string | null>(null);
 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -263,22 +345,46 @@ export default function AtendenteConversasPage() {
 
   // ── 5. Enviar mensagem ────────────────────────────────────────────────────
   const handleSend = async () => {
-    if (!input.trim() || !selectedJid || !instanceName) return;
+    if ((!input.trim() && !attachFile) || !selectedJid || !instanceNameRef.current) return;
     setSending(true);
     const texto = input.trim();
     setInput('');
+
     try {
-      await callMirror({
-        action: 'send_message',
-        instanceName,
-        numero: selectedJid.replace('@s.whatsapp.net', '').replace('@g.us', ''), // número limpo só para envio
-        message: texto,
-      });
-      setTimeout(() => fetchMessages(selectedJid), 1200);
+      if (attachFile && attachPreview) {
+        // Remove o prefixo "data:image/jpeg;base64," — envia só o base64 puro
+        const base64 = attachPreview.split(',')[1];
+        const isImage = attachFile.type.startsWith('image/');
+        const mediatype = isImage ? 'image' : 'document';
+
+        await callMirror({
+          action: 'send_media',
+          instanceName: instanceNameRef.current,
+          number: phoneLabel(selectedJid),
+          mediatype,
+          mimetype: attachFile.type,
+          fileName: attachFile.name,
+          caption: texto,
+          mediaBase64: base64,
+        });
+
+        setAttachFile(null);
+        setAttachPreview(null);
+      } else {
+        await callMirror({
+          action: 'send_message',
+          instanceName: instanceNameRef.current,
+          numero: phoneLabel(selectedJid),
+          message: texto,
+        });
+      }
+
+      setTimeout(() => fetchMessages(selectedJid), 1500);
     } catch (e: any) {
       toast.error('Falha ao enviar: ' + e.message);
       setInput(texto);
     }
+
     setSending(false);
   };
 
@@ -348,6 +454,28 @@ export default function AtendenteConversasPage() {
     } catch (e: any) {
       toast.error('Erro ao apagar: ' + e.message);
     }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Limite de 16MB
+    if (file.size > 16 * 1024 * 1024) {
+      toast.error('Arquivo muito grande. Máximo 16MB.');
+      return;
+    }
+
+    setAttachFile(file);
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAttachPreview(reader.result as string); // data:image/jpeg;base64,...
+    };
+    reader.readAsDataURL(file);
+
+    // Reseta o input para permitir selecionar o mesmo arquivo novamente
+    e.target.value = '';
   };
 
   // ── Agrupamento por data ──────────────────────────────────────────────────
@@ -642,13 +770,16 @@ export default function AtendenteConversasPage() {
                             </>
                           )}
                           <div className={`max-w-[80%] rounded-lg px-3 py-1.5 shadow-sm ${isMine
-                            ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none'
-                            : 'bg-white text-[#111b21] rounded-bl-none'
+                              ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none'
+                              : 'bg-white text-[#111b21] rounded-bl-none'
                             }`}>
                             {!isMine && msg.pushName && (
                               <p className="text-xs font-semibold text-primary mb-0.5">{msg.pushName}</p>
                             )}
-                            <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{texto}</p>
+
+                            {/* ← substitui o <p> de texto pelo componente */}
+                            <MsgConteudo msg={msg} />
+
                             <div className={`flex items-center gap-1 mt-0.5 ${isMine ? 'justify-end' : 'justify-start'}`}>
                               <span className="text-[10px] text-[#54656f]">{hora}</span>
                               {isMine && <CheckCheck className="h-3 w-3 text-[#53bdeb]" />}
@@ -677,22 +808,61 @@ export default function AtendenteConversasPage() {
             </div>
 
             {/* Composer */}
+            {/* Composer */}
             <div className="px-3 py-2 shrink-0" style={{ backgroundColor: '#f0f2f5' }}>
+              {/* Preview do arquivo selecionado */}
+              {attachPreview && (
+                <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 mb-2 shadow-sm">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-[#111b21] truncate">{attachFile?.name}</p>
+                    <p className="text-[10px] text-[#54656f]">{attachFile ? (attachFile.size / 1024).toFixed(1) + ' KB' : ''}</p>
+                  </div>
+                  {attachPreview.startsWith('data:image') && (
+                    <img src={attachPreview} className="h-10 w-10 object-cover rounded-lg shrink-0" />
+                  )}
+                  <button onClick={() => { setAttachFile(null); setAttachPreview(null); }}
+                    className="p-1 rounded-full hover:bg-gray-100 shrink-0">
+                    <span style={{ fontSize: 16, color: '#54656f' }}>×</span>
+                  </button>
+                </div>
+              )}
+
               <div className="flex items-end gap-2">
+                {/* Botão de anexo */}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 hover:bg-black/5 transition-colors"
+                  title="Anexar arquivo"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#54656f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                  </svg>
+                </button>
+
+                {/* Input de arquivo oculto — aceita imagem e documento */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
+                  className="hidden"
+                  onChange={handleFileSelect}
+                />
+
                 <div className="flex-1 bg-white rounded-2xl px-4 py-2 shadow-sm">
                   <textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="Digite uma mensagem..."
+                    placeholder={attachFile ? 'Adicione uma legenda...' : 'Digite uma mensagem...'}
                     className="w-full resize-none bg-transparent text-sm text-[#111b21] placeholder:text-[#8696a0] outline-none min-h-[20px] max-h-[80px]"
                     rows={1}
                   />
                 </div>
+
                 <Button
                   onClick={handleSend}
                   size="icon"
-                  disabled={!input.trim() || sending}
+                  disabled={(!input.trim() && !attachFile) || sending}
                   className="h-10 w-10 rounded-full shrink-0"
                   style={{ backgroundColor: '#075e54' }}
                 >
