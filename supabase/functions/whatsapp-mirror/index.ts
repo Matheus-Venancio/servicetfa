@@ -293,6 +293,27 @@ Deno.serve(async (req) => {
       return json({ ok: true, result: raw });
     }
 
+if (action === 'get_media') {
+  const { messageId, mediaType } = body;
+  if (!messageId) return json({ ok: false, error: 'messageId obrigatório' });
+
+  const isAudio = mediaType === 'audioMessage';
+
+  const res = await fetch(`${evoUrl}/chat/getBase64FromMediaMessage/${resolvedInstance}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: evoKey },
+    body: JSON.stringify({
+      message: { key: { id: messageId } },
+      convertToMp4: isAudio, // ← converte áudio para mp4/aac que o browser suporta
+    }),
+  });
+
+  const raw = await res.json().catch(() => ({}));
+  if (!res.ok) return json({ ok: false, error: raw?.message ?? `Erro ${res.status}` });
+
+  return json({ ok: true, base64: raw.base64, mimetype: raw.mimetype, fileName: raw.fileName });
+}
+
     // ── DEBUG — mostra configuração ───────────────────────────────────────────
     if (action === 'debug') {
       return json({

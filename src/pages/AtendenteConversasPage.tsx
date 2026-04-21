@@ -36,7 +36,7 @@ interface EvoMessage {
     imageMessage?: { caption?: string; url?: string; jpegThumbnail?: string };
     documentMessage?: { caption?: string; fileName?: string; url?: string };
     videoMessage?: { caption?: string; url?: string };
-    audioMessage?: { url?: string };
+    audioMessage?: { url?: string; ptt?: boolean; seconds?: number };
     stickerMessage?: { url?: string };
   };
   messageTimestamp?: number;
@@ -71,74 +71,6 @@ function extrairTexto(msg?: EvoMessage['message']): string {
   return msg.conversation || msg.extendedTextMessage?.text || '[Mídia]';
 }
 
-function MsgConteudo({ msg }: { msg: EvoMessage }) {
-  const m = msg.message;
-  if (!m) return <span className="text-sm italic text-[#8696a0]">[Mídia]</span>;
-
-  // Imagem — mostra thumbnail base64 ou placeholder
-  if (m.imageMessage) {
-    const thumb = m.imageMessage.jpegThumbnail
-      ? `data:image/jpeg;base64,${m.imageMessage.jpegThumbnail}`
-      : null;
-    return (
-      <div className="flex flex-col gap-1">
-        {thumb
-          ? <img src={thumb} className="rounded-lg max-w-[220px] max-h-[200px] object-cover" />
-          : <div className="rounded-lg bg-black/10 flex items-center justify-center" style={{ width: 180, height: 120 }}>
-            <span style={{ fontSize: 32 }}>🖼️</span>
-          </div>
-        }
-        {m.imageMessage.caption && (
-          <p className="text-sm whitespace-pre-wrap break-words">{m.imageMessage.caption}</p>
-        )}
-      </div>
-    );
-  }
-
-  // Documento
-  if (m.documentMessage) {
-    return (
-      <div className="flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2 min-w-[160px]">
-        <span style={{ fontSize: 24 }}>📄</span>
-        <div className="min-w-0">
-          <p className="text-sm font-medium truncate">{m.documentMessage.fileName || 'Documento'}</p>
-          {m.documentMessage.caption && (
-            <p className="text-xs text-[#54656f] truncate">{m.documentMessage.caption}</p>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Vídeo
-  if (m.videoMessage) {
-    return (
-      <div className="flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2">
-        <span style={{ fontSize: 24 }}>🎥</span>
-        <p className="text-sm">{m.videoMessage.caption || 'Vídeo'}</p>
-      </div>
-    );
-  }
-
-  // Áudio
-  if (m.audioMessage) {
-    return (
-      <div className="flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2">
-        <span style={{ fontSize: 24 }}>🎵</span>
-        <p className="text-sm">Áudio</p>
-      </div>
-    );
-  }
-
-  // Sticker
-  if (m.stickerMessage) {
-    return <span className="text-sm italic text-[#8696a0]">[Figurinha]</span>;
-  }
-
-  // Texto normal
-  const texto = m.conversation || m.extendedTextMessage?.text || '';
-  return <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{texto}</p>;
-}
 
 function formatarHora(ts?: number): string {
   if (!ts) return '';
@@ -173,7 +105,7 @@ const POLL_INTERVAL = 7000;
 export default function AtendenteConversasPage() {
   const { atendenteId } = useParams<{ atendenteId: string }>();
   const navigate = useNavigate();
-
+  const mediaCache = useRef<Record<string, string>>({});
   const [atendente, setAtendente] = useState<Atendente | null>(null);
   const [channel, setChannel] = useState<Channel | null>(null);
   const [instanceName, setInstanceName] = useState<string>('');
@@ -183,7 +115,7 @@ export default function AtendenteConversasPage() {
   const [chats, setChats] = useState<EvoChat[]>([]);
   const [loadingChats, setLoadingChats] = useState(false);
   const [chatsError, setChatsError] = useState<string | null>(null);
-
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [selectedJid, setSelectedJid] = useState<string | null>(null);
   const [selectedName, setSelectedName] = useState('');
   const [messages, setMessages] = useState<EvoMessage[]>([]);
@@ -341,9 +273,11 @@ export default function AtendenteConversasPage() {
     if (pollRef.current) clearInterval(pollRef.current);
     if (!selectedJid) return;
     fetchMessages(selectedJid);
-    pollRef.current = setInterval(() => fetchMessages(selectedJid), POLL_INTERVAL);
+    pollRef.current = setInterval(() => {
+      if (!isPlayingAudio) fetchMessages(selectedJid); // ← não atualiza se estiver ouvindo
+    }, POLL_INTERVAL);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [selectedJid, fetchMessages]);
+  }, [selectedJid, fetchMessages, isPlayingAudio]);
 
   // Auto-scroll
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -482,6 +416,153 @@ export default function AtendenteConversasPage() {
     // Reseta o input para permitir selecionar o mesmo arquivo novamente
     e.target.value = '';
   };
+
+  const getMediaUrl = useCallback(async (messageId: string, mediaType?: string): Promise<string | null> => {
+    if (mediaCache.current[messageId]) return mediaCache.current[messageId];
+    try {
+      const data = await callMirror({
+        action: 'get_media',
+        instanceName: instanceNameRef.current,
+        messageId,
+        mediaType, // ← passa o tipo para a edge function saber se converte
+      });
+      if (!data?.base64) return null;
+
+      // Força mimetype correto para áudio — browser precisa de mp4 ou mpeg
+      let mimetype = data.mimetype || 'application/octet-stream';
+      if (mediaType === 'audioMessage') mimetype = 'audio/mp4';
+
+      const url = `data:${mimetype};base64,${data.base64}`;
+      mediaCache.current[messageId] = url;
+      return url;
+    } catch { return null; }
+  }, [callMirror]);
+
+  function MsgMedia({ msg, getMediaUrl, onAudioPlay, onAudioStop }: {
+    msg: EvoMessage;
+    getMediaUrl: (id: string, mediaType?: string) => Promise<string | null>;
+    onAudioPlay: () => void;
+    onAudioStop: () => void;
+  }) {
+    const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
+    const m = msg.message;
+
+    const load = async (mediaType?: string) => {
+      if (mediaUrl || loading) return;
+      setLoading(true);
+      const url = await getMediaUrl(msg.key.id, mediaType);
+      setMediaUrl(url);
+      setLoading(false);
+    };
+
+    if (!m) return <span className="text-sm italic text-[#8696a0]">[Mídia]</span>;
+
+    // ── Imagem ──
+    if (m.imageMessage) {
+      const thumb = m.imageMessage.jpegThumbnail
+        ? `data:image/jpeg;base64,${m.imageMessage.jpegThumbnail}`
+        : null;
+      return (
+        <div className="flex flex-col gap-1">
+          <img
+            src={mediaUrl || thumb || ''}
+            className="rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+            style={{ maxWidth: 220, width: '100%', height: 'auto' }} // ← tamanho natural
+            onClick={async () => {
+              await load();
+              const src = mediaUrl || thumb;
+              if (!src) return;
+              const w = window.open('');
+              w?.document.write(`<html><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="${src}" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>`);
+            }}
+            title="Clique para ampliar"
+          />
+          {m.imageMessage.caption && (
+            <p className="text-sm whitespace-pre-wrap break-words">{m.imageMessage.caption}</p>
+          )}
+        </div>
+      );
+    }
+
+    // ── Áudio ──
+    if (m.audioMessage) {
+      return (
+        <div className="flex items-center gap-2 min-w-[200px]">
+          <span style={{ fontSize: 18 }}>🎵</span>
+          {mediaUrl ? (
+            <audio
+              controls
+              src={mediaUrl}
+              className="flex-1"
+              style={{ height: 32, minWidth: 160 }}
+              onPlay={onAudioPlay}
+              onPause={onAudioStop}
+              onEnded={onAudioStop}
+            />
+          ) : (
+            <button
+              onClick={() => load('audioMessage')} // ← passa o tipo
+              disabled={loading}
+              className="flex items-center gap-2 bg-black/5 rounded-full px-3 py-1.5 hover:bg-black/10 transition-colors"
+            >
+              {loading
+                ? <Loader2 className="h-4 w-4 animate-spin text-[#54656f]" />
+                : <span className="text-sm text-[#54656f]">▶ Carregar áudio</span>
+              }
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    // ── Documento ──
+    if (m.documentMessage) {
+      const fileName = m.documentMessage.fileName || 'documento';
+      return (
+        <div
+          className="flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2 min-w-[160px] cursor-pointer hover:bg-black/10 transition-colors"
+          onClick={async () => {
+            await load();
+            if (!mediaUrl) { toast.error('Não foi possível carregar o arquivo.'); return; }
+            const a = document.createElement('a');
+            a.href = mediaUrl;
+            a.download = fileName;
+            a.click();
+          }}
+        >
+          {loading ? <Loader2 className="h-5 w-5 animate-spin text-[#54656f]" /> : <span style={{ fontSize: 24 }}>📄</span>}
+          <div className="min-w-0">
+            <p className="text-sm font-medium truncate">{fileName}</p>
+            <p className="text-xs text-[#54656f]">{mediaUrl ? 'Baixar' : 'Toque para baixar'}</p>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Vídeo ──
+    if (m.videoMessage) {
+      return (
+        <div className="flex flex-col gap-1">
+          {mediaUrl ? (
+            <video controls src={mediaUrl} className="rounded-lg" style={{ maxWidth: 220 }} />
+          ) : (
+            <button onClick={load} disabled={loading}
+              className="flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2 hover:bg-black/10">
+              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <span style={{ fontSize: 24 }}>🎥</span>}
+              <span className="text-sm text-[#54656f]">{loading ? 'Carregando...' : 'Toque para ver vídeo'}</span>
+            </button>
+          )}
+          {m.videoMessage.caption && <p className="text-sm">{m.videoMessage.caption}</p>}
+        </div>
+      );
+    }
+
+    if (m.stickerMessage) return <span className="text-sm italic text-[#8696a0]">[Figurinha]</span>;
+
+    const texto = m.conversation || m.extendedTextMessage?.text || '';
+    return <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{texto}</p>;
+  }
 
   const startRecording = async () => {
     try {
@@ -865,7 +946,12 @@ export default function AtendenteConversasPage() {
                             )}
 
                             {/* ← substitui o <p> de texto pelo componente */}
-                            <MsgConteudo msg={msg} />
+                            <MsgMedia
+                              msg={msg}
+                              getMediaUrl={getMediaUrl}
+                              onAudioPlay={() => setIsPlayingAudio(true)}
+                              onAudioStop={() => setIsPlayingAudio(false)}
+                            />
 
                             <div className={`flex items-center gap-1 mt-0.5 ${isMine ? 'justify-end' : 'justify-start'}`}>
                               <span className="text-[10px] text-[#54656f]">{hora}</span>
