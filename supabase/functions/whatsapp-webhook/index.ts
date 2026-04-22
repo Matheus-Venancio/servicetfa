@@ -7,199 +7,228 @@ const corsHeaders = {
 
 const SAC_INSTANCE = 'atendente'
 
-function normalizeEvent(event: string): string {
-  return event?.toUpperCase().replace('.', '_')
+async function enviarMensagem(
+  evolutionUrl: string,
+  apiKey: string,
+  instanceName: string,
+  numero: string,
+  texto: string
+): Promise<boolean> {
+  try {
+    const phoneClean = numero.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '')
+    const res = await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': apiKey },
+      body: JSON.stringify({ number: phoneClean, text: texto }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      console.error(`[enviarMensagem] Falhou (${res.status}):`, err)
+      return false
+    }
+    return true
+  } catch (e) {
+    console.error('[enviarMensagem] Erro de rede:', e)
+    return false
+  }
 }
 
-function extrairTextoMensagem(message: any): string {
-  if (!message) return '[Mídia]'
-  if (message.conversation) return message.conversation
-  if (message.extendedTextMessage?.text) return message.extendedTextMessage.text
-  if (message.imageMessage?.caption) return message.imageMessage.caption
-  if (message.videoMessage?.caption) return message.videoMessage.caption
-  if (message.documentMessage?.title) return message.documentMessage.title
-  if (message.audioMessage) return '[Áudio]'
-  if (message.stickerMessage) return '[Figurinha]'
-  return '[Mídia]'
-}
-
-// ── Gera texto de notificação ────────────────────────────────────────────────
-function gerarTextoNotificacao(
-  telefoneCliente: string,
-  nomeCliente: string | null,
-  ultimaMensagem: string
-): string {
-  const nome = nomeCliente || telefoneCliente
-  return `📨 Nova mensagem no SAC TFA Viagens\n\n👤 Cliente: ${nome}\n📞 Telefone: ${telefoneCliente}\n💬 Mensagem: ${ultimaMensagem}\n\nClique para responder via WhatsApp:`
-}
-
-// ── Gera link wa.me ──────────────────────────────────────────────────────────
-function gerarLinkWaMe(telefoneCliente: string, texto: string): string {
-  const phoneClean = telefoneCliente.replace(/[^0-9]/g, '')
-  return `https://wa.me/${phoneClean}?text=${encodeURIComponent(texto)}`
-}
-
-console.log('🚀 Serviço whatsapp-webhook iniciado e aguardando requisições...')
-
-// ── Main handler ─────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
   }
 
+  const ok = (data = {}) => new Response(JSON.stringify({ ok: true, ...data }), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+
+  const erro = (msg: string, status = 500) => new Response(JSON.stringify({ ok: false, error: msg }), {
+    status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+
   try {
-    // Busca variáveis com prefixo VITE_ pois é assim que estão no seu arquivo .env
-    const supabaseUrl = Deno.env.get('VITE_SUPABASE_URL')
-    const supabaseKey = Deno.env.get('VITE_SUPABASE_ANON_KEY')
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    )
 
-    if (!supabaseUrl || !supabaseKey) {
-      throw new Error('Supabase URL ou Key não encontrados no ambiente.')
-    }
+    const EVOLUTION_URL = Deno.env.get('EVOLUTION_URL') || 'https://evolution.innovatedigitals.com.br'
+    const EVOLUTION_API = Deno.env.get('EVOLUTION_API') || 'd3b7573358045479207c1e94adfbf4a3'
 
-    const supabase = createClient(supabaseUrl, supabaseKey)
-
-    let body;
+    let body: any
     try {
       body = await req.json()
-    } catch (err) {
-      console.log('[Webhook] Requisição recebida sem um JSON válido (Ping ou método inválido).')
-      return new Response('OK', { status: 200 })
+    } catch {
+      return ok({ info: 'body inválido ignorado' })
     }
 
-    const event = normalizeEvent(body?.event)
-    const instance = body?.instance
-    const data = body?.data
+    const event    = (body.event || '').toLowerCase().replace('.', '_')
+    const instance = body.instance
+    const data     = body.data
 
-    console.log(`[Webhook] Evento: ${event} | Instância: ${instance}`)
+    console.log(`[Webhook] event=${event} instance=${instance}`)
 
-    if (event === 'MESSAGES_UPSERT') {
-      const remoteJid = data?.key?.remoteJid
-      const fromMe = data?.key?.fromMe || false
+    // ── connection_update ────────────────────────────────────────────────────
+    if (event === 'connection_update') {
+      const state = data?.state
+      if (state && instance) {
+        const status = state === 'open' ? 'connected'
+          : state === 'close' ? 'disconnected'
+          : 'connecting'
+        await supabase
+          .from('whatsapp_channels')
+          .update({ status })
+          .eq('instance_name', instance)
+        console.log(`[Webhook] Canal ${instance} → ${status}`)
+      }
+      return ok()
+    }
 
-      // Ignora: broadcasts, grupos, mensagens enviadas pelo próprio SAC
-      if (!remoteJid || remoteJid === 'status@broadcast' || remoteJid.endsWith('@g.us') || fromMe) {
-        return new Response('Ignorado', { status: 200 })
+    // ── messages_upsert ──────────────────────────────────────────────────────
+    if (event === 'messages_upsert') {
+      const remoteJid     = data?.key?.remoteJid
+      const fromMe        = data?.key?.fromMe || false
+      const pushName      = data?.pushName?.trim() || null
+      const messageId     = data?.key?.id
+      const mensagemTexto =
+        data?.message?.conversation ||
+        data?.message?.extendedTextMessage?.text ||
+        data?.message?.imageMessage?.caption ||
+        '[Mídia]'
+
+      // Ignora broadcasts, grupos e mensagens enviadas pelo SAC
+      if (
+        !remoteJid ||
+        remoteJid === 'status@broadcast' ||
+        remoteJid.endsWith('@g.us') ||
+        fromMe
+      ) {
+        return ok({ info: 'ignorado' })
       }
 
-      // Só processa mensagens do SAC principal
+      // Só processa mensagens do SAC
       if (instance !== SAC_INSTANCE) {
-        console.log(`[Webhook] Instância ${instance} ignorada — não é o SAC.`)
-        return new Response('OK', { status: 200 })
+        console.log(`[Webhook] Instância ${instance} ignorada — não é o SAC`)
+        return ok({ info: 'instância ignorada' })
       }
 
-      const telefone = remoteJid.replace('@s.whatsapp.net', '')
-      const nomeContato = data?.pushName?.trim() || null
-      const mensagemTexto = extrairTextoMensagem(data?.message)
+      const telefone = remoteJid
+        .replace('@s.whatsapp.net', '')
+        .replace('@lid', '')
+        .replace(/[^0-9]/g, '')
 
-      console.log(`[Webhook] Mensagem de: ${telefone} (${nomeContato}): ${mensagemTexto}`)
-
-      // ── 1. Busca atendentes ONLINE com telefone cadastrado ─────────────────
-      const { data: atendentesOnline, error: atenErr } = await supabase
-        .from('atendentes')
-        .select('id, nome, telefone, status')
-        .eq('status', 'ONLINE')
-
-      if (atenErr) console.error('[Webhook] Erro ao buscar atendentes:', atenErr)
-
-      const atendentesDisponiveis = (atendentesOnline ?? []).filter(
-        (a: any) => a.telefone && a.telefone.trim() !== ''
-      )
-
-      console.log(`[Webhook] Atendentes ONLINE disponíveis: ${atendentesDisponiveis.length}`)
-
-      // ── 2. Localiza ou cria o lead ─────────────────────────────────────────
-      let { data: lead } = await supabase
+      // ── Verifica se lead já existe ────────────────────────────────────────
+      const { data: leadExistente } = await supabase
         .from('leads')
         .select('*')
         .eq('telefone', telefone)
         .maybeSingle()
 
-      if (!lead) {
-        console.log('[Webhook] Novo lead — aplicando round-robin...')
+      if (!leadExistente) {
+        // ── NOVO LEAD → Round-Robin ───────────────────────────────────────
+        console.log(`[Webhook] Novo lead: ${telefone} (${pushName}). Iniciando round-robin...`)
 
-        // Pega próximo atendente da fila (função PostgreSQL existente)
-        const { data: atendenteId } = await supabase.rpc('proxima_da_fila')
+        const { data: atendenteId, error: rpcErr } = await supabase.rpc('proxima_da_fila')
+        if (rpcErr) console.error('[Webhook] Erro proxima_da_fila:', rpcErr)
 
-        const { data: novoLead, error: insertError } = await supabase
+        let atendente: any = null
+        if (atendenteId) {
+          const { data: a } = await supabase
+            .from('atendentes')
+            .select('*')
+            .eq('id', atendenteId)
+            .single()
+          atendente = a
+          console.log(`[Webhook] Atendente selecionado: ${atendente?.nome}`)
+        }
+
+        // Insere lead na tabela
+        const { data: novoLead, error: insertErr } = await supabase
           .from('leads')
           .insert({
+            nome: pushName,
             telefone,
-            nome: nomeContato,
-            canal_origem: 'ORGANICO',
             status: atendenteId ? 'EM_ATENDIMENTO' : 'AGUARDANDO',
+            canal_origem: 'ORGANICO',
             atendente_id: atendenteId || null,
             ultima_mensagem: mensagemTexto,
           })
           .select()
           .single()
 
-        if (insertError) throw insertError
-        lead = novoLead
+        if (insertErr) {
+          console.error('[Webhook] Erro ao criar lead:', insertErr)
+          return erro('Erro ao criar lead: ' + insertErr.message)
+        }
 
-        console.log(`[Webhook] Lead criado: ${lead.id} | Atendente: ${atendenteId ?? 'nenhum'}`)
-      } else {
-        // Atualiza lead existente
-        await supabase
-          .from('leads')
-          .update({
-            ultima_mensagem: mensagemTexto,
-            atualizado_em: new Date().toISOString(),
-            nome: lead.nome || nomeContato,
-          })
-          .eq('id', lead.id)
+        console.log(`[Webhook] Lead criado: ${novoLead.id}`)
 
-        console.log(`[Webhook] Lead existente atualizado: ${lead.id}`)
+        // ── Notifica atendente via instância DELE ─────────────────────────
+        if (atendente?.telefone) {
+          // Busca canal/instância do atendente
+          const { data: canalAtendente } = await supabase
+            .from('whatsapp_channels')
+            .select('instance_name, evolution_api_url, api_key')
+            .eq('atendente_id', atendente.id)
+            .maybeSingle()
+
+          const instanciaEnvio = canalAtendente?.instance_name || SAC_INSTANCE
+          const urlEnvio       = canalAtendente?.evolution_api_url || EVOLUTION_URL
+          const keyEnvio       = canalAtendente?.api_key || EVOLUTION_API
+
+          const linkWaMe = `https://wa.me/${telefone}?text=${encodeURIComponent(`Olá ${pushName || ''}! Atendendo pelo TFA Viagens.`)}`
+
+          const notificacao =
+            `🔔 *Novo lead no SAC TFA Viagens*\n\n` +
+            `👤 *Nome:* ${pushName || 'Desconhecido'}\n` +
+            `📞 *Telefone:* ${telefone}\n` +
+            `💬 *Mensagem:* ${mensagemTexto}\n\n` +
+            `👆 Toque para responder:\n${linkWaMe}`
+
+          const enviou = await enviarMensagem(
+            urlEnvio,
+            keyEnvio,
+            instanciaEnvio,
+            atendente.telefone,
+            notificacao
+          )
+
+          console.log(`[Webhook] Notificação ao atendente ${atendente.nome} via ${instanciaEnvio}: ${enviou ? 'OK' : 'FALHOU'}`)
+        } else {
+          console.warn('[Webhook] Atendente sem telefone — notificação não enviada')
+        }
+
+        // ── Confirmação automática ao cliente ─────────────────────────────
+        await enviarMensagem(
+          EVOLUTION_URL,
+          EVOLUTION_API,
+          SAC_INSTANCE,
+          telefone,
+          `Olá${pushName ? ` ${pushName}` : ''}! 😊\n\nRecebemos sua mensagem e já notificamos nossa equipe. Em breve um atendente entrará em contato com você.`
+        )
+
+        return ok({ distribuido_para: atendente?.nome ?? 'fila_espera' })
       }
 
-      // ── 3. Salva mensagem na tabela ────────────────────────────────────────
-      await supabase.from('mensagens').insert({
-        lead_id: lead.id,
-        origem: 'LEAD',
-        tipo: 'TEXTO',
-        conteudo: mensagemTexto,
-      })
+      // ── LEAD EXISTENTE → apenas atualiza ─────────────────────────────────
+      console.log(`[Webhook] Lead existente: ${leadExistente.id}. Atualizando...`)
 
-      // ── 4. Registra aviso no sistema com os links WA.ME ────────────────────
-      if (atendentesDisponiveis.length > 0) {
-        console.log(`[Webhook] Gerando links wa.me para ${atendentesDisponiveis.length} atendente(s)...`)
-
-        const texto = gerarTextoNotificacao(telefone, nomeContato, mensagemTexto)
-        const linkWaMe = gerarLinkWaMe(telefone, texto)
-
-        // Registra como mensagem de sistema
-        await supabase.from('mensagens').insert({
-          lead_id: lead.id,
-          origem: 'SISTEMA',
-          tipo: 'SISTEMA',
-          conteudo: `🔔 Novo lead na fila!\nDisponível para os atendentes iniciarem contato.\n\n🔗 Clique e responda:\n${linkWaMe}`
+      await supabase
+        .from('leads')
+        .update({
+          ultima_mensagem: mensagemTexto,
+          atualizado_em: new Date().toISOString(),
+          nome: leadExistente.nome || pushName,
         })
-      } else {
-        console.warn('[Webhook] Nenhum atendente ONLINE com telefone cadastrado.')
-        await supabase.from('mensagens').insert({
-          lead_id: lead.id,
-          origem: 'SISTEMA',
-          tipo: 'SISTEMA',
-          conteudo: `⚠️ Mensagem recebida de ${nomeContato || telefone}, mas nenhum atendente ONLINE.`,
-        })
-      }
+        .eq('id', leadExistente.id)
 
-      // ── 5. Retorno ao webhoook (cliente não receberá auto-resposta via evolution) ──
-      console.log(`[Webhook] Concluído para lead ${lead.id}`)
-
-      return new Response(JSON.stringify({ ok: true, lead_id: lead.id }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return ok({ lead_id: leadExistente.id })
     }
 
-    return new Response(JSON.stringify({ ok: true }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    return ok({ info: 'evento ignorado' })
 
-  } catch (error) {
-    console.error('[Webhook] Erro Crítico:', error)
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+  } catch (e: any) {
+    console.error('[Webhook] Erro crítico:', e)
+    return erro('Erro interno: ' + e.message)
   }
 })
