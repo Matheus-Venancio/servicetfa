@@ -7,11 +7,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import {
-  Plus, Users, Loader2, X, Search, Filter, MessageCircle, Calendar, MapPin, DollarSign, Edit
+  Plus, Users, Loader2, X, Search, Filter, MessageCircle, Calendar, MapPin, DollarSign, Edit, FileText
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+
+type LeadWithContratos = Lead & { contratos?: any[] };
 
 export default function ClientesPage() {
-  const [leads, setLeads] = useState<Lead[]>([]);
+  const navigate = useNavigate();
+  const [leads, setLeads] = useState<LeadWithContratos[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Modal states
@@ -37,11 +41,11 @@ export default function ClientesPage() {
     setLoading(true);
     const { data, error } = await supabase
       .from('leads')
-      .select('*')
+      .select('*, contratos(*)')
       .order('criado_em', { ascending: false });
 
     if (!error && data) {
-      setLeads(data);
+      setLeads(data as unknown as LeadWithContratos[]);
     } else if (error) {
       toast.error('Erro ao buscar clientes: ' + error.message);
     }
@@ -239,6 +243,7 @@ export default function ClientesPage() {
                     <th className="px-6 py-4 font-medium">Cliente</th>
                     <th className="px-6 py-4 font-medium">Contato</th>
                     <th className="px-6 py-4 font-medium">Destino</th>
+                    <th className="px-6 py-4 font-medium">Documentos & Fatura</th>
                     <th className="px-6 py-4 font-medium">Status & Score</th>
                     <th className="px-6 py-4 font-medium text-right">Ações</th>
                   </tr>
@@ -246,7 +251,7 @@ export default function ClientesPage() {
                 <tbody className="divide-y divide-border">
                   {leads.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
+                      <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground">
                         Nenhum cliente cadastrado.
                       </td>
                     </tr>
@@ -286,6 +291,35 @@ export default function ClientesPage() {
                               )}
                             </div>
                           )}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col gap-1 w-48">
+                            <span className="text-sm font-bold text-green-600">
+                              Total: R$ {lead.total_gasto?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'}
+                            </span>
+                            {lead.contratos && lead.contratos.length > 0 ? (
+                              <div className="mt-1 max-h-[80px] overflow-y-auto custom-scrollbar border border-border rounded-md p-1 bg-muted/20">
+                                {lead.contratos.map(c => (
+                                  <div 
+                                    key={c.id} 
+                                    onClick={() => navigate('/gestor/documentos')}
+                                    className="flex items-center justify-between p-1.5 hover:bg-muted rounded cursor-pointer text-xs group transition-colors"
+                                    title="Abrir Documentos"
+                                  >
+                                    <div className="flex items-center gap-1.5 overflow-hidden">
+                                      <FileText className="h-3 w-3 text-muted-foreground group-hover:text-primary shrink-0" />
+                                      <span className="truncate">{c.tipo}</span>
+                                    </div>
+                                    <span className="font-semibold text-muted-foreground shrink-0 ml-2">
+                                      R$ {c.valor?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground italic mt-1">Nenhum documento</span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex flex-col gap-2 items-start">

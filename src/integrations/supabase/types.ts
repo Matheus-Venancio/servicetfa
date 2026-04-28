@@ -52,6 +52,7 @@ export interface Database {
           pagina_origem: string | null
           utm_source: string | null
           utm_campaign: string | null
+          total_gasto: number | null
           criado_em: string
           atualizado_em: string
         }
@@ -76,6 +77,7 @@ export interface Database {
           pagina_origem?: string | null
           utm_source?: string | null
           utm_campaign?: string | null
+          total_gasto?: number | null
         }
         Update: { [key: string]: any }
       }
@@ -129,6 +131,29 @@ export interface Database {
           lead_id: string
           atendente_id: string
           conteudo: string
+        }
+        Update: { [key: string]: any }
+      }
+      contratos: {
+        Row: {
+          id: string
+          lead_id: string
+          tipo: 'NACIONAL' | 'INTERNACIONAL'
+          status: 'GERADO' | 'ENVIADO' | 'ASSINADO' | 'FATURADO'
+          conteudo: string | null
+          valor: number | null
+          criado_em: string
+          atualizado_em: string
+        }
+        Insert: {
+          id?: string
+          lead_id: string
+          tipo: 'NACIONAL' | 'INTERNACIONAL'
+          status?: 'GERADO' | 'ENVIADO' | 'ASSINADO' | 'FATURADO'
+          conteudo?: string | null
+          valor?: number | null
+          criado_em?: string
+          atualizado_em?: string
         }
         Update: { [key: string]: any }
       }
@@ -218,6 +243,7 @@ export type Mensagem    = Database['public']['Tables']['mensagens']['Row']
 export type Campanha    = Database['public']['Tables']['campanhas']['Row']
 export type FilaConfig  = Database['public']['Tables']['fila_config']['Row']
 export type NotaInterna = Database['public']['Tables']['notas_internas']['Row']
+export type Contrato    = Database['public']['Tables']['contratos']['Row']
 
 export type LeadStatus  = Lead['status']
 export type LeadScore   = Lead['score']

@@ -12,6 +12,7 @@ import AtendentesPage from "@/pages/AtendentesPage";
 import AtendenteConversasPage from "@/pages/AtendenteConversasPage";
 import WhatsAppConnectPage from "@/pages/WhatsAppConnectPage";
 import ClientesPage from "@/pages/ClientesPage";
+import DocumentosPage from "@/pages/DocumentosPage";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -41,6 +42,7 @@ const App = () => (
             <Route path="/gestor/atendentes" element={<AtendentesPage />} />
             <Route path="/gestor/atendentes/:atendenteId/conversas" element={<AtendenteConversasPage />} />
             <Route path="/gestor/clientes" element={<ClientesPage />} />
+            <Route path="/gestor/documentos" element={<DocumentosPage />} />
 
           </Route>
 
