@@ -5,7 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const SAC_INSTANCE = 'atendente'
+const SAC_INSTANCE = 'sactfa'
 
 async function enviarMensagem(
   evolutionUrl: string,

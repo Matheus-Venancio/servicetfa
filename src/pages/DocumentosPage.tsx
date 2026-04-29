@@ -187,19 +187,44 @@ Assinatura do Contratante
     doc.save(`contrato-${contrato.lead?.nome?.replace(/\s+/g, '-') || 'cliente'}.pdf`);
   };
 
-  const handleSendEmail = (contrato: ContratoComLead) => {
+  const handleSendEmail = async (contrato: ContratoComLead) => {
     if (!contrato.lead?.email) {
       toast.error('Este cliente não possui e-mail cadastrado.');
       return;
     }
-    const subject = encodeURIComponent(`Seu Contrato de Viagem - TFA Viagens`);
-    const body = encodeURIComponent(`Olá ${contrato.lead.nome},\n\nSegue abaixo o descritivo do seu contrato de viagem. Por favor, baixe o PDF anexo ou confira as condições abaixo.\n\n${contrato.conteudo}\n\nAtenciosamente,\nTFA Viagens`);
-    window.location.href = `mailto:${contrato.lead.email}?subject=${subject}&body=${body}`;
+
+    try {
+      toast.loading('Enviando e-mail pelo sistema...');
+      
+      const { data, error } = await supabase.functions.invoke('send-contract-email', {
+        body: {
+          email: contrato.lead.email,
+          nome: contrato.lead.nome,
+          token: contrato.token_assinatura,
+          tipo: contrato.tipo
+        }
+      });
+
+      if (error) throw new Error(error.message);
+
+      // Atualiza o status para enviado
+      if (contrato.status === 'GERADO') {
+        await supabase.from('contratos').update({ status: 'ENVIADO' }).eq('id', contrato.id);
+        fetchData();
+      }
+
+      toast.dismiss();
+      toast.success('E-mail com link de assinatura enviado com sucesso!');
+    } catch (err: any) {
+      toast.dismiss();
+      console.error(err);
+      toast.error('Falha ao enviar e-mail: Verifique se a Edge Function e o Resend estão configurados no Supabase.');
+    }
   };
 
   const handleFaturar = async (contrato: ContratoComLead) => {
-    if (contrato.status === 'FATURADO') {
-      toast.info('Este contrato já está faturado.');
+    if (contrato.status !== 'ASSINADO') {
+      toast.error('Apenas contratos com status ASSINADO podem ser faturados.');
       return;
     }
 
@@ -335,9 +360,10 @@ Assinatura do Contratante
                             <Button 
                               variant="outline" 
                               size="sm" 
-                              className={`h-8 text-xs ${c.status === 'FATURADO' ? 'text-muted-foreground' : 'text-green-600 hover:text-green-700 hover:bg-green-50'}`}
+                              className={`h-8 text-xs ${c.status === 'FATURADO' ? 'text-muted-foreground' : c.status === 'ASSINADO' ? 'text-green-600 hover:text-green-700 hover:bg-green-50' : 'text-gray-400 opacity-50 cursor-not-allowed'}`}
                               onClick={() => handleFaturar(c)} 
-                              disabled={c.status === 'FATURADO'}
+                              disabled={c.status !== 'ASSINADO'}
+                              title={c.status === 'FATURADO' ? 'Já faturado' : c.status !== 'ASSINADO' ? 'Aguardando assinatura' : 'Faturar'}
                             >
                               {c.status === 'FATURADO' ? <CheckCircle className="h-3 w-3 mr-1" /> : <DollarSign className="h-3 w-3 mr-1" />}
                               {c.status === 'FATURADO' ? 'Faturado' : 'Faturar'}

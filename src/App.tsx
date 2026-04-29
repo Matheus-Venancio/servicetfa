@@ -8,11 +8,12 @@ import AppShell from "@/components/AppShell";
 import LoginPage from "@/pages/LoginPage";
 import DashboardPage from "@/pages/DashboardPage";
 import ConversasPage from "@/pages/ConversasPage";
+import ClientesPage from "@/pages/ClientesPage";
 import AtendentesPage from "@/pages/AtendentesPage";
 import AtendenteConversasPage from "@/pages/AtendenteConversasPage";
 import WhatsAppConnectPage from "@/pages/WhatsAppConnectPage";
-import ClientesPage from "@/pages/ClientesPage";
 import DocumentosPage from "@/pages/DocumentosPage";
+import AssinaturaPage from "@/pages/AssinaturaPage";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -32,6 +33,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/assinatura/:token" element={<AssinaturaPage />} />
           <Route path="/" element={<Navigate to="/login" replace />} />
 
           {/* Gestor routes — AppShell as layout */}

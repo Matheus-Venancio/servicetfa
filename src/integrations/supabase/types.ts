@@ -142,6 +142,10 @@ export interface Database {
           status: 'GERADO' | 'ENVIADO' | 'ASSINADO' | 'FATURADO'
           conteudo: string | null
           valor: number | null
+          token_assinatura: string | null
+          ip_assinatura: string | null
+          user_agent_assinatura: string | null
+          data_assinatura: string | null
           criado_em: string
           atualizado_em: string
         }
@@ -152,6 +156,10 @@ export interface Database {
           status?: 'GERADO' | 'ENVIADO' | 'ASSINADO' | 'FATURADO'
           conteudo?: string | null
           valor?: number | null
+          token_assinatura?: string | null
+          ip_assinatura?: string | null
+          user_agent_assinatura?: string | null
+          data_assinatura?: string | null
           criado_em?: string
           atualizado_em?: string
         }
