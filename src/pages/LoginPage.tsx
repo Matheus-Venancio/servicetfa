@@ -1,31 +1,30 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import logoTfa from '@/assets/logo-tfa.png';
+import { toast } from 'sonner';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [showPass, setShowPass] = useState(false);
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
     setLoading(true);
-    const ok = await login(email, senha);
+    const result = await login(email, senha);
     setLoading(false);
-    if (ok) {
-      const user = useAuthStore.getState().user;
+    
+    if (result.success) {
       navigate('/gestor/dashboard');
     } else {
-      setError('E-mail ou senha inválidos');
+      toast.error(result.error || 'Falha no login. Verifique suas credenciais.');
     }
   };
 
@@ -88,22 +87,23 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {error && <p className="text-destructive text-sm text-center">{error}</p>}
-
             <Button type="submit" className="w-full" disabled={loading}>
+              {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               {loading ? 'Entrando...' : 'Entrar'}
             </Button>
 
-            <p className="text-center text-sm text-muted-foreground hover:text-foreground cursor-pointer">
-              Esqueceu sua senha?
-            </p>
+            <div className="flex flex-col gap-2 pt-2">
+              <p className="text-center text-sm text-muted-foreground">
+                Ainda não tem acesso?{" "}
+                <Link to="/register" className="text-primary font-medium hover:underline">
+                  Solicitar Cadastro
+                </Link>
+              </p>
+              <p className="text-center text-sm text-muted-foreground hover:text-foreground cursor-pointer">
+                Esqueceu sua senha?
+              </p>
+            </div>
           </form>
-
-          <div className="mt-6 pt-4 border-t border-border">
-            <p className="text-xs text-muted-foreground text-center">
-              Demo: gestor@tfa.com / ana@tfa.com — Senha: 123456
-            </p>
-          </div>
         </div>
       </div>
     </div>

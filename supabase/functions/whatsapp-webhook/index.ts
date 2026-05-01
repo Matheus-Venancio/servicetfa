@@ -55,18 +55,16 @@ Deno.serve(async (req) => {
     const EVOLUTION_URL = Deno.env.get('EVOLUTION_URL') || 'https://evolution.innovatedigitals.com.br'
     const EVOLUTION_API = Deno.env.get('EVOLUTION_API') || 'd3b7573358045479207c1e94adfbf4a3'
 
-    let body: any
+    let body: Record<string, unknown>
     try {
       body = await req.json()
     } catch {
       return ok({ info: 'body inválido ignorado' })
     }
 
-    const event    = (body.event || '').toLowerCase().replace('.', '_')
-    const instance = body.instance
-    const data     = body.data
-
-    console.log(`[Webhook] event=${event} instance=${instance}`)
+    const event    = (String(body.event || '')).toLowerCase().replace('.', '_')
+    const instance = body.instance as string
+    const data     = body.data as Record<string, any>
 
     // ── connection_update ────────────────────────────────────────────────────
     if (event === 'connection_update') {
@@ -131,7 +129,7 @@ Deno.serve(async (req) => {
         const { data: atendenteId, error: rpcErr } = await supabase.rpc('proxima_da_fila')
         if (rpcErr) console.error('[Webhook] Erro proxima_da_fila:', rpcErr)
 
-        let atendente: any = null
+        let atendente: Record<string, unknown> | null = null
         if (atendenteId) {
           const { data: a } = await supabase
             .from('atendentes')
@@ -227,8 +225,8 @@ Deno.serve(async (req) => {
 
     return ok({ info: 'evento ignorado' })
 
-  } catch (e: any) {
+  } catch (e) {
     console.error('[Webhook] Erro crítico:', e)
-    return erro('Erro interno: ' + e.message)
+    return erro('Erro interno: ' + (e instanceof Error ? e.message : String(e)))
   }
 })

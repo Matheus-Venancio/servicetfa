@@ -102,78 +102,6 @@ export async function atribuirLeadAoAtendente(
   return true
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// criarEDistribuirLead
-// Fluxo completo: cria o lead no banco e já distribui para o próximo
-// atendente da fila. Retorna o lead criado com o atendente atribuído.
-// ─────────────────────────────────────────────────────────────────────────────
-export async function criarEDistribuirLead(dadosLead: {
-  telefone: string
-  nome?: string
-  canal_origem?: Lead['canal_origem']
-  utm_source?: string
-  utm_campaign?: string
-  pagina_origem?: string
-  primeira_mensagem?: string
-}): Promise<{ leadId: string; atendenteId: string | null; atendente: Atendente | null }> {
-
-  // 1. Descobre quem vai receber (antes de criar, para já salvar atribuído)
-  const distribuicao = await distribuirLead()
-
-  // 2. Cria o lead já com o atendente (ou AGUARDANDO se ninguém online)
-  const { data: novoLead, error } = await supabase
-    .from('leads')
-    .insert({
-      telefone: dadosLead.telefone,
-      nome: dadosLead.nome ?? null,
-      canal_origem: dadosLead.canal_origem ?? 'META_ADS',
-      utm_source: dadosLead.utm_source ?? null,
-      utm_campaign: dadosLead.utm_campaign ?? null,
-      pagina_origem: dadosLead.pagina_origem ?? null,
-      atendente_id: distribuicao.atendente?.id ?? null,
-      status: distribuicao.sucesso ? 'EM_ATENDIMENTO' : 'AGUARDANDO',
-      score: 'FRIO',
-    })
-    .select()
-    .single()
-
-  if (error || !novoLead) {
-    throw new Error(`Erro ao criar lead: ${error?.message}`)
-  }
-
-  // 3. Registra a primeira mensagem se existir
-  if (dadosLead.primeira_mensagem) {
-    await supabase.from('mensagens').insert({
-      lead_id: novoLead.id,
-      origem: 'LEAD',
-      tipo: 'TEXTO',
-      conteudo: dadosLead.primeira_mensagem,
-    })
-  }
-
-  // 4. Mensagem de sistema informando a distribuição
-  if (distribuicao.sucesso && distribuicao.atendente) {
-    await supabase.from('mensagens').insert({
-      lead_id: novoLead.id,
-      origem: 'SISTEMA',
-      tipo: 'SISTEMA',
-      conteudo: `Lead distribuído automaticamente para ${distribuicao.atendente.nome} via fila round-robin.`,
-    })
-  } else {
-    await supabase.from('mensagens').insert({
-      lead_id: novoLead.id,
-      origem: 'SISTEMA',
-      tipo: 'SISTEMA',
-      conteudo: `Nenhum atendente disponível no momento. Lead em fila de espera (${distribuicao.motivo}).`,
-    })
-  }
-
-  return {
-    leadId: novoLead.id,
-    atendenteId: distribuicao.atendente?.id ?? null,
-    atendente: distribuicao.atendente,
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // consultarEstadoFila
@@ -205,31 +133,7 @@ export async function consultarEstadoFila(): Promise<EstadoFila> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// redistribuirLeadManual
-// Usado pelo gestor para reatribuir manualmente um lead a outro atendente.
-// ─────────────────────────────────────────────────────────────────────────────
-export async function redistribuirLeadManual(
-  leadId: string,
-  novoAtendenteId: string,
-  gestorId: string
-): Promise<boolean> {
-  const { error } = await supabase
-    .from('leads')
-    .update({ atendente_id: novoAtendenteId, status: 'EM_ATENDIMENTO' })
-    .eq('id', leadId)
 
-  if (error) return false
-
-  // Registra nota interna de redistribuição
-  await supabase.from('notas_internas').insert({
-    lead_id: leadId,
-    atendente_id: gestorId,
-    conteudo: 'Lead redistribuído manualmente pelo gestor.',
-  })
-
-  return true
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // processarLeadsAguardando

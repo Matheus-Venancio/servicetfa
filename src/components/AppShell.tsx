@@ -41,6 +41,7 @@ const NAV_GESTOR: NavSection[] = [
     items: [
       { icon: LayoutDashboard, label: 'Dashboard', path: '/gestor/dashboard' },
       { icon: Users, label: 'Atendentes', path: '/gestor/atendentes' },
+      { icon: Shield, label: 'Gestão de Acesso', path: '/gestor/acessos' },
       { icon: Smartphone, label: 'Documentos', path: '/gestor/documentos' },
       { icon: MessageCircle, label: 'Clientes', path: '/gestor/clientes' },
       { icon: TrendingUp, label: 'Relatórios', path: '#', disabled: true },
