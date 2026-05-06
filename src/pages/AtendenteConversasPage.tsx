@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+﻿import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { AvatarInicial } from '@/components/AvatarInicial';
@@ -69,6 +69,133 @@ function extrairTexto(msg?: EvoMessage['message']): string {
   if (msg.audioMessage) return '🎵 Áudio';
   if (msg.stickerMessage) return '[Figurinha]';
   return msg.conversation || msg.extendedTextMessage?.text || '[Mídia]';
+}
+
+// ← FORA do AtendenteConversasPage, antes da declaração do componente
+// Junto aos outros helpers como extrairTexto, formatarHora, etc.
+
+interface MsgMediaProps {
+  msg: EvoMessage;
+  getMediaUrl: (id: string, mediaType?: string) => Promise<string | null>;
+  onAudioPlay: () => void;
+  onAudioStop: () => void;
+}
+
+function MsgMedia({ msg, getMediaUrl, onAudioPlay, onAudioStop }: MsgMediaProps) {
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const m = msg.message;
+
+  const load = async (mediaType?: string) => {
+    if (mediaUrl || loading) return;
+    setLoading(true);
+    const url = await getMediaUrl(msg.key.id, mediaType);
+    setMediaUrl(url);
+    setLoading(false);
+  };
+
+  if (!m) return <span className="text-sm italic text-[#8696a0]">[Mídia]</span>;
+
+  if (m.imageMessage) {
+    const thumb = m.imageMessage.jpegThumbnail
+      ? `data:image/jpeg;base64,${m.imageMessage.jpegThumbnail}`
+      : null;
+    return (
+      <div className="flex flex-col gap-1">
+        <img
+          src={mediaUrl || thumb || ''}
+          className="rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+          style={{ maxWidth: 220, width: '100%', height: 'auto' }}
+          onClick={async () => {
+            await load();
+            const src = mediaUrl || thumb;
+            if (!src) return;
+            const w = window.open('');
+            w?.document.write(`<html><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="${src}" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>`);
+          }}
+          title="Clique para ampliar"
+        />
+        {m.imageMessage.caption && (
+          <p className="text-sm whitespace-pre-wrap break-words">{m.imageMessage.caption}</p>
+        )}
+      </div>
+    );
+  }
+
+  if (m.audioMessage) {
+    return (
+      <div className="flex items-center gap-2 min-w-[180px]">
+        <span style={{ fontSize: 18 }}>🎵</span>
+        {mediaUrl ? (
+          <audio
+            controls
+            src={mediaUrl}
+            className="flex-1"
+            style={{ height: 32, minWidth: 140 }}
+            onPlay={onAudioPlay}
+            onPause={onAudioStop}
+            onEnded={onAudioStop}
+          />
+        ) : (
+          <button
+            onClick={() => load('audioMessage')}
+            disabled={loading}
+            className="flex items-center gap-2 bg-black/5 rounded-full px-3 py-1.5 hover:bg-black/10 transition-colors"
+          >
+            {loading
+              ? <Loader2 className="h-4 w-4 animate-spin text-[#54656f]" />
+              : <span className="text-sm text-[#54656f]">▶ Carregar áudio</span>
+            }
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (m.documentMessage) {
+    const fileName = m.documentMessage.fileName || 'documento';
+    return (
+      <div
+        className="flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2 min-w-[160px] cursor-pointer hover:bg-black/10 transition-colors"
+        onClick={async () => {
+          await load();
+          if (!mediaUrl) { return; }
+          const a = document.createElement('a');
+          a.href = mediaUrl;
+          a.download = fileName;
+          a.click();
+        }}
+      >
+        {loading ? <Loader2 className="h-5 w-5 animate-spin text-[#54656f]" /> : <span style={{ fontSize: 24 }}>📄</span>}
+        <div className="min-w-0">
+          <p className="text-sm font-medium truncate">{fileName}</p>
+          <p className="text-xs text-[#54656f]">{mediaUrl ? 'Baixar' : 'Toque para baixar'}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (m.videoMessage) {
+    return (
+      <div className="flex flex-col gap-1">
+        {mediaUrl ? (
+          <video controls src={mediaUrl} className="rounded-lg" style={{ maxWidth: 220 }} />
+        ) : (
+          <button onClick={() => load()} disabled={loading}
+            className="flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2 hover:bg-black/10">
+            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <span style={{ fontSize: 24 }}>🎥</span>}
+            <span className="text-sm text-[#54656f]">{loading ? 'Carregando...' : 'Toque para ver vídeo'}</span>
+          </button>
+        )}
+        {m.videoMessage.caption && <p className="text-sm">{m.videoMessage.caption}</p>}
+      </div>
+    );
+  }
+
+  if (m.stickerMessage) return <span className="text-sm italic text-[#8696a0]">[Figurinha]</span>;
+
+  const texto = m.conversation || m.extendedTextMessage?.text || '';
+  return <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{texto}</p>;
 }
 
 
@@ -455,131 +582,7 @@ export default function AtendenteConversasPage() {
     } catch { return null; }
   }, [callMirror]);
 
-  function MsgMedia({ msg, getMediaUrl, onAudioPlay, onAudioStop }: {
-    msg: EvoMessage;
-    getMediaUrl: (id: string, mediaType?: string) => Promise<string | null>;
-    onAudioPlay: () => void;
-    onAudioStop: () => void;
-  }) {
-    const [mediaUrl, setMediaUrl] = useState<string | null>(null);
-    const [loading, setLoading] = useState(false);
-    const m = msg.message;
-
-    const load = async (mediaType?: string) => {
-      if (mediaUrl || loading) return;
-      setLoading(true);
-      const url = await getMediaUrl(msg.key.id, mediaType);
-      setMediaUrl(url);
-      setLoading(false);
-    };
-
-    if (!m) return <span className="text-sm italic text-[#8696a0]">[Mídia]</span>;
-
-    // ── Imagem ──
-    if (m.imageMessage) {
-      const thumb = m.imageMessage.jpegThumbnail
-        ? `data:image/jpeg;base64,${m.imageMessage.jpegThumbnail}`
-        : null;
-      return (
-        <div className="flex flex-col gap-1">
-          <img
-            src={mediaUrl || thumb || ''}
-            className="rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-            style={{ maxWidth: 220, width: '100%', height: 'auto' }} // ← tamanho natural
-            onClick={async () => {
-              await load();
-              const src = mediaUrl || thumb;
-              if (!src) return;
-              const w = window.open('');
-              w?.document.write(`<html><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="${src}" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>`);
-            }}
-            title="Clique para ampliar"
-          />
-          {m.imageMessage.caption && (
-            <p className="text-sm whitespace-pre-wrap break-words">{m.imageMessage.caption}</p>
-          )}
-        </div>
-      );
-    }
-
-    // ── Áudio ──
-    if (m.audioMessage) {
-      return (
-        <div className="flex items-center gap-2 min-w-[200px]">
-          <span style={{ fontSize: 18 }}>🎵</span>
-          {mediaUrl ? (
-            <audio
-              controls
-              src={mediaUrl}
-              className="flex-1"
-              style={{ height: 32, minWidth: 160 }}
-              onPlay={onAudioPlay}
-              onPause={onAudioStop}
-              onEnded={onAudioStop}
-            />
-          ) : (
-            <button
-              onClick={() => load('audioMessage')} // ← passa o tipo
-              disabled={loading}
-              className="flex items-center gap-2 bg-black/5 rounded-full px-3 py-1.5 hover:bg-black/10 transition-colors"
-            >
-              {loading
-                ? <Loader2 className="h-4 w-4 animate-spin text-[#54656f]" />
-                : <span className="text-sm text-[#54656f]">▶ Carregar áudio</span>
-              }
-            </button>
-          )}
-        </div>
-      );
-    }
-
-    // ── Documento ──
-    if (m.documentMessage) {
-      const fileName = m.documentMessage.fileName || 'documento';
-      return (
-        <div
-          className="flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2 min-w-[160px] cursor-pointer hover:bg-black/10 transition-colors"
-          onClick={async () => {
-            await load();
-            if (!mediaUrl) { toast.error('Não foi possível carregar o arquivo.'); return; }
-            const a = document.createElement('a');
-            a.href = mediaUrl;
-            a.download = fileName;
-            a.click();
-          }}
-        >
-          {loading ? <Loader2 className="h-5 w-5 animate-spin text-[#54656f]" /> : <span style={{ fontSize: 24 }}>📄</span>}
-          <div className="min-w-0">
-            <p className="text-sm font-medium truncate">{fileName}</p>
-            <p className="text-xs text-[#54656f]">{mediaUrl ? 'Baixar' : 'Toque para baixar'}</p>
-          </div>
-        </div>
-      );
-    }
-
-    // ── Vídeo ──
-    if (m.videoMessage) {
-      return (
-        <div className="flex flex-col gap-1">
-          {mediaUrl ? (
-            <video controls src={mediaUrl} className="rounded-lg" style={{ maxWidth: 220 }} />
-          ) : (
-            <button onClick={load} disabled={loading}
-              className="flex items-center gap-2 bg-black/5 rounded-lg px-3 py-2 hover:bg-black/10">
-              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <span style={{ fontSize: 24 }}>🎥</span>}
-              <span className="text-sm text-[#54656f]">{loading ? 'Carregando...' : 'Toque para ver vídeo'}</span>
-            </button>
-          )}
-          {m.videoMessage.caption && <p className="text-sm">{m.videoMessage.caption}</p>}
-        </div>
-      );
-    }
-
-    if (m.stickerMessage) return <span className="text-sm italic text-[#8696a0]">[Figurinha]</span>;
-
-    const texto = m.conversation || m.extendedTextMessage?.text || '';
-    return <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{texto}</p>;
-  }
+  
 
   const startRecording = async () => {
     try {
@@ -751,9 +754,11 @@ export default function AtendenteConversasPage() {
   }
 
   // ── Interface principal — Espelho WhatsApp ────────────────────────────────
+  // ── Interface principal — Layout dividido ─────────────────────────────────
   return (
-    <div className="h-full flex flex-col">
-      {/* Header */}
+    <div className="h-full flex flex-col overflow-hidden">
+
+      {/* ── Topbar ─────────────────────────────────────────────────────────── */}
       <div className="h-12 px-4 flex items-center gap-3 border-b border-border bg-card shrink-0">
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate('/gestor/atendentes')}>
           <ArrowLeft className="h-4 w-4" />
@@ -766,7 +771,9 @@ export default function AtendenteConversasPage() {
           <h2 className="text-sm font-semibold text-foreground">{atendente.nome}</h2>
           <div className="flex items-center gap-1.5">
             <Wifi className="h-3 w-3 text-success" />
-            <span className="text-xs text-success">Instância: <code className="font-mono">{instanceName}</code></span>
+            <span className="text-xs text-success">
+              Instância: <code className="font-mono">{instanceName}</code>
+            </span>
           </div>
         </div>
         <Button
@@ -778,126 +785,115 @@ export default function AtendenteConversasPage() {
         </Button>
       </div>
 
-      {/* Lista de conversas — ocupa a tela inteira */}
-      <div className="flex-1 overflow-hidden flex flex-col bg-card">
-        {/* Busca */}
-        <div className="p-3 border-b border-border shrink-0">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Buscar conversa..."
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              className="pl-9 h-9 text-sm bg-muted/50"
-            />
+      {/* ── Corpo dividido ─────────────────────────────────────────────────── */}
+      <div className="flex-1 flex overflow-hidden">
+
+        {/* ═══ Painel esquerdo — lista de contatos (estreito) ══════════════ */}
+        <div className="w-72 flex flex-col border-r border-border bg-card shrink-0 overflow-hidden">
+
+          {/* Busca */}
+          <div className="p-2.5 border-b border-border shrink-0">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Buscar conversa..."
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-muted/60 border border-transparent focus:border-border focus:bg-background outline-none transition-colors text-foreground placeholder:text-muted-foreground"
+              />
+            </div>
+          </div>
+
+          {/* Lista */}
+          <div className="flex-1 overflow-y-auto">
+            {loadingChats && chats.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-32 gap-2">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <p className="text-xs text-muted-foreground">Buscando conversas...</p>
+              </div>
+            ) : chatsError ? (
+              <div className="flex flex-col items-center justify-center gap-3 px-3 text-center py-8">
+                <AlertTriangle className="h-8 w-8 text-warning/60" />
+                <p className="text-xs text-muted-foreground">{chatsError}</p>
+                <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => fetchChats()}>
+                  <RefreshCw className="h-3 w-3 mr-1" /> Tentar novamente
+                </Button>
+              </div>
+            ) : chatsFiltrados.length === 0 && !loadingChats ? (
+              <div className="flex flex-col items-center justify-center h-32 gap-2 px-4 text-center">
+                <MessageCircle className="h-8 w-8 text-muted-foreground/30" />
+                <p className="text-xs text-muted-foreground">Nenhuma conversa encontrada</p>
+              </div>
+            ) : (
+              chatsFiltrados.map((chat) => {
+                const isSelected = selectedJid === chat.id;
+                const lastText = extrairTexto(chat.lastMessage?.message as any);
+                return (
+                  <button
+                    key={chat.id}
+                    onClick={() => {
+                      setSelectedName(chatLabel(chat));
+                      setSelectedJid(chat.id);
+                      setMessages([]);
+                    }}
+                    className={`w-full text-left flex items-center gap-2.5 px-3 py-2.5 border-b border-border/30 transition-all duration-150 ${isSelected
+                        ? 'bg-primary/10 border-l-2 border-l-primary'
+                        : 'hover:bg-muted/50 border-l-2 border-l-transparent'
+                      }`}
+                  >
+                    <AvatarInicial nome={chatLabel(chat)} size="sm" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="font-semibold text-xs text-foreground truncate">{chatLabel(chat)}</span>
+                        {chat.lastMessage?.messageTimestamp && (
+                          <span className="text-[10px] text-muted-foreground shrink-0 ml-1">
+                            {formatarData(chat.lastMessage.messageTimestamp)}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground truncate">{lastText}</p>
+                    </div>
+                    {(chat.unreadCount ?? 0) > 0 && (
+                      <span className="bg-success text-white text-[10px] rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center font-mono shrink-0">
+                        {chat.unreadCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })
+            )}
           </div>
         </div>
 
-        {/* Lista */}
-        <div className="flex-1 overflow-y-auto">
-          {loadingChats && chats.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-40 gap-2">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              <p className="text-xs text-muted-foreground">Buscando conversas...</p>
-            </div>
-          ) : chatsError ? (
-            <div className="flex flex-col items-center justify-center h-full gap-3 px-4 text-center py-8">
-              <AlertTriangle className="h-10 w-10 text-warning/60" />
-              <p className="text-xs text-muted-foreground">{chatsError}</p>
-              <Button size="sm" variant="outline" onClick={() => fetchChats()}>
-                <RefreshCw className="h-3 w-3 mr-1" /> Tentar novamente
-              </Button>
-            </div>
-          ) : chatsFiltrados.length === 0 && !loadingChats ? (
-            <div className="flex flex-col items-center justify-center h-40 gap-2 px-4 text-center">
-              <MessageCircle className="h-10 w-10 text-muted-foreground/30" />
-              <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada</p>
-            </div>
-          ) : (
-            chatsFiltrados.map((chat) => {
-              const isSelected = selectedJid === chat.id;
-              const lastText = extrairTexto(chat.lastMessage?.message as any);
-              return (
-                <button
-                  key={chat.id}
-                  onClick={() => {
-                    setSelectedName(chatLabel(chat));
-                    setSelectedJid(chat.id);
-                    setMessages([]);
-                  }}
-                  className={`w-full text-left flex items-center gap-3 px-4 py-3.5 border-b border-border/40 transition-all duration-150 ${isSelected
-                    ? 'bg-primary/10 border-l-[3px] border-l-primary'
-                    : 'hover:bg-muted/60 border-l-[3px] border-l-transparent'
-                    }`}
-                >
-                  <AvatarInicial nome={chatLabel(chat)} size="md" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-0.5">
-                      <span className="font-semibold text-sm text-foreground truncate">{chatLabel(chat)}</span>
-                      {chat.lastMessage?.messageTimestamp && (
-                        <span className="text-[10px] text-muted-foreground shrink-0 ml-2">
-                          {formatarData(chat.lastMessage.messageTimestamp)}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground truncate">{lastText}</p>
-                  </div>
-                  {(chat.unreadCount ?? 0) > 0 && (
-                    <span className="bg-success text-white text-[10px] rounded-full h-5 min-w-[20px] px-1.5 flex items-center justify-center font-mono shrink-0">
-                      {chat.unreadCount}
-                    </span>
-                  )}
-                </button>
-              );
-            })
-          )}
-        </div>
-      </div>
+        {/* ═══ Painel direito — conversa ═══════════════════════════════════ */}
+        {selectedJid ? (
+          <div className="flex-1 flex flex-col overflow-hidden relative">
 
-      {/* ── POPUP MODAL de conversa ── */}
-      {selectedJid && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
-          onClick={(e) => {
-            // fecha ao clicar fora do modal
-            if (e.target === e.currentTarget) {
-              setSelectedJid(null);
-              setMessages([]);
-            }
-          }}
-        >
-          <div
-            className="flex flex-col rounded-2xl overflow-hidden shadow-2xl"
-            style={{ width: '480px', height: '680px', maxWidth: '95vw', maxHeight: '90vh' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header do popup */}
+            {/* Header da conversa */}
             <div
-              className="flex items-center gap-3 px-4 py-3 shrink-0"
+              className="flex items-center gap-3 px-4 py-2.5 shrink-0"
               style={{ backgroundColor: '#075e54' }}
             >
-              <AvatarInicial nome={selectedName} size="md" />
+              <AvatarInicial nome={selectedName} size="sm" />
               <div className="flex-1 min-w-0">
                 <h3 className="font-semibold text-white text-sm truncate">{selectedName}</h3>
-                <p className="text-xs text-white/70">{phoneLabel(selectedJid)}</p>
+                <p className="text-[11px] text-white/70">{phoneLabel(selectedJid)}</p>
               </div>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => selectedJid && fetchMessages(selectedJid)}
-                  className="p-1.5 rounded-full hover:bg-white/10 transition-colors"
-                  title="Atualizar mensagens"
-                >
-                  <RefreshCw className={`h-4 w-4 text-white ${loadingMsgs ? 'animate-spin' : ''}`} />
-                </button>
-                <button
-                  onClick={() => { setSelectedJid(null); setMessages([]); }}
-                  className="p-1.5 rounded-full hover:bg-white/10 transition-colors"
-                  title="Fechar"
-                >
-                  <span className="text-white text-lg leading-none">×</span>
-                </button>
-              </div>
+              <button
+                onClick={() => selectedJid && fetchMessages(selectedJid)}
+                className="p-1.5 rounded-full hover:bg-white/10 transition-colors"
+                title="Atualizar mensagens"
+              >
+                <RefreshCw className={`h-4 w-4 text-white ${loadingMsgs ? 'animate-spin' : ''}`} />
+              </button>
+              <button
+                onClick={() => { setSelectedJid(null); setMessages([]); }}
+                className="p-1.5 rounded-full hover:bg-white/10 transition-colors"
+                title="Fechar conversa"
+              >
+                <span className="text-white text-lg leading-none">×</span>
+              </button>
             </div>
 
             {/* Área de mensagens */}
@@ -928,48 +924,46 @@ export default function AtendenteConversasPage() {
                   </div>
                   {group.msgs.map((msg, idx) => {
                     const isMine = msg.key.fromMe;
-                    const texto = extrairTexto(msg.message);
                     const hora = formatarHora(msg.messageTimestamp);
                     const uniqueKey = msg.key?.id ?? `${msg.messageTimestamp}-${idx}`;
                     return (
                       <div key={uniqueKey} className={`flex mb-1 group ${isMine ? 'justify-end' : 'justify-start'}`}>
-                        <div className="relative">
-                          {/* Botão apagar — só aparece no hover de mensagens minhas */}
-                          {/* Botões hover — só em mensagens minhas */}
+                        <div className={`flex items-end gap-1 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
+
+                          {/* Botões fora do bubble, ao lado */}
                           {isMine && (
-                            <>
+                            <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity mb-1">
                               <button
                                 onClick={() => { setEditingMsg(msg); setEditText(extrairTexto(msg.message)); }}
-                                className="absolute -left-12 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full hover:bg-black/10"
-                                title="Editar mensagem"
+                                className="p-1 rounded-full hover:bg-black/10"
+                                title="Editar"
                               >
-                                <span style={{ fontSize: 14, color: '#54656f' }}>✏️</span>
+                                <span style={{ fontSize: 13 }}>✏️</span>
                               </button>
                               <button
                                 onClick={() => handleDeleteMessage(msg)}
-                                className="absolute -left-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full hover:bg-black/10"
-                                title="Apagar mensagem"
+                                className="p-1 rounded-full hover:bg-black/10"
+                                title="Apagar"
                               >
-                                <span style={{ fontSize: 14, color: '#54656f' }}>🗑</span>
+                                <span style={{ fontSize: 13 }}>🗑</span>
                               </button>
-                            </>
+                            </div>
                           )}
-                          <div className={`max-w-[80%] rounded-lg px-3 py-1.5 shadow-sm ${isMine
-                            ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none'
-                            : 'bg-white text-[#111b21] rounded-bl-none'
+
+                          {/* Bubble */}
+                          <div className={`max-w-[85%] rounded-lg px-3 py-1.5 shadow-sm ${isMine
+                              ? 'bg-[#d9fdd3] text-[#111b21] rounded-br-none'
+                              : 'bg-white text-[#111b21] rounded-bl-none'
                             }`}>
                             {!isMine && msg.pushName && (
                               <p className="text-xs font-semibold text-primary mb-0.5">{msg.pushName}</p>
                             )}
-
-                            {/* ← substitui o <p> de texto pelo componente */}
                             <MsgMedia
                               msg={msg}
                               getMediaUrl={getMediaUrl}
                               onAudioPlay={() => setIsPlayingAudio(true)}
                               onAudioStop={() => setIsPlayingAudio(false)}
                             />
-
                             <div className={`flex items-center gap-1 mt-0.5 ${isMine ? 'justify-end' : 'justify-start'}`}>
                               <span className="text-[10px] text-[#54656f]">{hora}</span>
                               {isMine && <CheckCheck className="h-3 w-3 text-[#53bdeb]" />}
@@ -1017,31 +1011,25 @@ export default function AtendenteConversasPage() {
 
               <div className="flex items-end gap-2">
                 {isRecording ? (
-                  // ── Modo gravação ──
                   <>
                     <button onClick={cancelRecording}
                       className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 hover:bg-black/5"
                       title="Cancelar">
                       <span style={{ fontSize: 20, color: '#e53e3e' }}>×</span>
                     </button>
-
                     <div className="flex-1 bg-white rounded-2xl px-4 py-2 shadow-sm flex items-center gap-2">
                       <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse shrink-0" />
                       <span className="text-sm text-[#111b21] font-mono">{formatRecordingTime(recordingSeconds)}</span>
                       <span className="text-xs text-[#54656f]">Gravando...</span>
                     </div>
-
                     <button onClick={handleAudioSend} disabled={sending}
                       className="h-10 w-10 rounded-full flex items-center justify-center shrink-0"
                       style={{ backgroundColor: '#075e54' }}
                       title="Enviar áudio">
-                      {sending
-                        ? <Loader2 className="h-4 w-4 animate-spin text-white" />
-                        : <Send className="h-4 w-4 text-white" />}
+                      {sending ? <Loader2 className="h-4 w-4 animate-spin text-white" /> : <Send className="h-4 w-4 text-white" />}
                     </button>
                   </>
                 ) : (
-                  // ── Modo normal ──
                   <>
                     <button onClick={() => fileInputRef.current?.click()}
                       className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 hover:bg-black/5 transition-colors"
@@ -1050,11 +1038,9 @@ export default function AtendenteConversasPage() {
                         <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                       </svg>
                     </button>
-
                     <input ref={fileInputRef} type="file"
                       accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
                       className="hidden" onChange={handleFileSelect} />
-
                     <div className="flex-1 bg-white rounded-2xl px-4 py-2 shadow-sm">
                       <textarea
                         value={input}
@@ -1065,8 +1051,6 @@ export default function AtendenteConversasPage() {
                         rows={1}
                       />
                     </div>
-
-                    {/* Microfone ou Enviar */}
                     {input.trim() || attachFile ? (
                       <Button onClick={handleSend} size="icon"
                         disabled={(!input.trim() && !attachFile) || sending}
@@ -1090,41 +1074,57 @@ export default function AtendenteConversasPage() {
                 )}
               </div>
             </div>
-          </div>
-          {editingMsg && (
-            <div className="absolute inset-0 z-20 flex items-end justify-center pb-4 px-4"
-              style={{ backgroundColor: 'rgba(0,0,0,0.3)' }}
-              onClick={(e) => { if (e.target === e.currentTarget) { setEditingMsg(null); setEditText(''); } }}
-            >
-              <div className="bg-white rounded-2xl shadow-xl w-full p-4 flex flex-col gap-3">
-                <p className="text-xs text-[#54656f] font-medium">Editar mensagem</p>
-                <textarea
-                  value={editText}
-                  onChange={(e) => setEditText(e.target.value)}
-                  className="w-full resize-none text-sm text-[#111b21] border border-gray-200 rounded-lg px-3 py-2 outline-none min-h-[60px]"
-                  autoFocus
-                />
-                <div className="flex gap-2 justify-end">
-                  <button
-                    onClick={() => { setEditingMsg(null); setEditText(''); }}
-                    className="px-4 py-1.5 text-sm text-[#54656f] border border-gray-200 rounded-lg hover:bg-gray-50"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    onClick={handleEditMessage}
-                    disabled={!editText.trim()}
-                    className="px-4 py-1.5 text-sm text-white rounded-lg disabled:opacity-40"
-                    style={{ backgroundColor: '#075e54' }}
-                  >
-                    Salvar
-                  </button>
+
+            {/* Modal de edição (inline, sobre o painel) */}
+            {editingMsg && (
+              <div
+                className="absolute inset-0 z-20 flex items-end justify-center pb-4 px-4"
+                style={{ backgroundColor: 'rgba(0,0,0,0.3)' }}
+                onClick={(e) => { if (e.target === e.currentTarget) { setEditingMsg(null); setEditText(''); } }}
+              >
+                <div className="bg-white rounded-2xl shadow-xl w-full p-4 flex flex-col gap-3">
+                  <p className="text-xs text-[#54656f] font-medium">Editar mensagem</p>
+                  <textarea
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    className="w-full resize-none text-sm text-[#111b21] border border-gray-200 rounded-lg px-3 py-2 outline-none min-h-[60px]"
+                    autoFocus
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => { setEditingMsg(null); setEditText(''); }}
+                      className="px-4 py-1.5 text-sm text-[#54656f] border border-gray-200 rounded-lg hover:bg-gray-50"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleEditMessage}
+                      disabled={!editText.trim()}
+                      className="px-4 py-1.5 text-sm text-white rounded-lg disabled:opacity-40"
+                      style={{ backgroundColor: '#075e54' }}
+                    >
+                      Salvar
+                    </button>
+                  </div>
                 </div>
               </div>
+            )}
+          </div>
+        ) : (
+          /* Placeholder quando nenhum contato selecionado */
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-muted/10">
+            <div className="h-20 w-20 rounded-full bg-muted/40 flex items-center justify-center">
+              <MessageCircle className="h-10 w-10 text-muted-foreground/30" />
             </div>
-          )}
-        </div>
-      )}
+            <div className="text-center">
+              <p className="text-base font-medium text-foreground">Selecione uma conversa</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Escolha um contato na lista ao lado para ver as mensagens
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
