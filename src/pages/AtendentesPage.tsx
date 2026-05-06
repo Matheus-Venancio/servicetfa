@@ -251,66 +251,13 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const handleGerarQR = async (atendente: Atendente) => {
   setIsGeneratingQr(atendente.id);
   setNome(atendente.nome);
-  toast.info(`Criando instância para ${atendente.nome}...`);
+  toast.info(`Gerando QR Code para ${atendente.nome}...`);
 
   try {
-    const instanceName = `tfa-${atendente.id.slice(0, 8)}`;
+    // Usa o instance_name salvo no banco; se ainda não existe, deriva do ID
+    const instanceName = atendente.instance_name ?? `tfa-${atendente.id.slice(0, 8)}`;
 
-    // PASSO 1 — Criar (ou recriar) a instância na Evolution
-    const createRes = await fetch(`${EVOLUTION_URL}/instance/create`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': EVOLUTION_TOKEN,
-      },
-      body: JSON.stringify({
-        instanceName,
-        qrcode: true,
-        integration: 'WHATSAPP-BAILEYS',
-      }),
-    });
-
-    if (!createRes.ok) {
-      const errBody = await createRes.json().catch(() => ({}));
-
-      // Se a instância já existe, tenta deletar e recriar
-      if (createRes.status === 409 || errBody?.message?.includes('already')) {
-        toast.info('Instância já existe. Reconectando...');
-
-        await fetch(`${EVOLUTION_URL}/instance/delete/${instanceName}`, {
-          method: 'DELETE',
-          headers: { 'apikey': EVOLUTION_TOKEN },
-        });
-
-        await sleep(1500);
-
-        const retryRes = await fetch(`${EVOLUTION_URL}/instance/create`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': EVOLUTION_TOKEN,
-          },
-          body: JSON.stringify({
-            instanceName,
-            qrcode: true,
-            integration: 'WHATSAPP-BAILEYS',
-          }),
-        });
-
-        if (!retryRes.ok) {
-          const retryErr = await retryRes.json().catch(() => ({}));
-          throw new Error(retryErr?.message ?? `Erro ao recriar instância: ${retryRes.status}`);
-        }
-      } else {
-        throw new Error(errBody?.message ?? `Erro ao criar instância: ${createRes.status}`);
-      }
-    }
-
-    // PASSO 2 — Aguarda a instância inicializar antes de buscar o QR
-    toast.info('Aguardando inicialização...');
-    await sleep(3000);
-
-    // PASSO 3 — Buscar o QR Code
+    // Busca QR da instância já existente (SEM criar ou deletar)
     const connectRes = await fetch(`${EVOLUTION_URL}/instance/connect/${instanceName}`, {
       method: 'GET',
       headers: { 'apikey': EVOLUTION_TOKEN },
@@ -318,14 +265,13 @@ const handleGerarQR = async (atendente: Atendente) => {
 
     if (!connectRes.ok) {
       const errBody = await connectRes.json().catch(() => ({}));
-      throw new Error(errBody?.message ?? `Erro ao buscar QR: ${connectRes.status}`);
+      throw new Error(errBody?.message ?? `Erro ao buscar QR da instância: ${connectRes.status}`);
     }
 
     const connectData = await connectRes.json();
     console.log('Evolution connect response:', connectData);
 
-    // PASSO 4 — Extrair o QR Code da resposta
-    // A Evolution pode retornar em formatos diferentes dependendo da versão
+    // Extrai o base64 — a Evolution pode retornar em diferentes formatos
     const base64QR =
       connectData?.base64 ||
       connectData?.qrcode?.base64 ||
@@ -333,34 +279,31 @@ const handleGerarQR = async (atendente: Atendente) => {
       connectData?.data?.qrcode?.base64 ||
       null;
 
-    const pairingCode =
-      connectData?.pairingCode ||
-      connectData?.qrcode?.pairingCode ||
-      null;
-
     if (base64QR) {
-      // Garante que tem o prefixo data:image correto
       const qrDataUrl = base64QR.startsWith('data:image')
         ? base64QR
         : `data:image/png;base64,${base64QR}`;
-
       setQrCode(qrDataUrl);
       toast.success('QR Code gerado! Escaneie com o WhatsApp.');
 
-    } else if (connectData?.instance?.state === 'open') {
-      toast.info('Este número já está conectado ao WhatsApp.');
+    } else if (
+      connectData?.instance?.state === 'open' ||
+      connectData?.state === 'open'
+    ) {
+      toast.info(`${atendente.nome} já está conectado ao WhatsApp. Nenhuma ação necessária.`);
 
     } else {
-      // Log completo para debug
       console.error('Resposta inesperada da Evolution:', JSON.stringify(connectData, null, 2));
-      toast.warning('QR Code não retornado. Veja o console para detalhes.');
+      toast.warning('QR Code não retornado. Verifique o console para detalhes.');
     }
 
-    // PASSO 5 — Salva o instanceName no Supabase para referência futura
-    await supabase
-      .from('atendentes')
-      .update({ instance_name: instanceName } as never)
-      .eq('id', atendente.id);
+    // Garante que o instance_name está salvo no Supabase
+    if (!atendente.instance_name) {
+      await supabase
+        .from('atendentes')
+        .update({ instance_name: instanceName } as never)
+        .eq('id', atendente.id);
+    }
 
   } catch (err: any) {
     console.error('Erro ao gerar QR:', err);
