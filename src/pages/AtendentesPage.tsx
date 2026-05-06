@@ -50,19 +50,32 @@ export default function AtendentesPage() {
 
   const fetchAtendentes = async () => {
     setLoading(true);
-    const { data, error } = await (supabase
-      .from('atendentes')
-      .select('*')
-      .eq('papel', 'ATENDENTE') as unknown as Promise<{ data: Atendente[] | null; error: any }>);
 
-    if (!error && data) {
-      // Injeta métricas default apenas visualmente para manter o Design original intacto
-      const a = data.map((d: Atendente) => ({
-        ...d,
-        leadsAtivos: Math.floor(Math.random() * 5), // provisório
-        conversoes: Math.floor(Math.random() * 3),
-        naoLidas: 0,
-      }));
+    // Busca atendentes e leads em paralelo para métricas reais
+    const [atendentesRes, leadsRes] = await Promise.all([
+      (supabase
+        .from('atendentes')
+        .select('*')
+        .eq('papel', 'ATENDENTE') as unknown as Promise<{ data: Atendente[] | null; error: any }>),
+      supabase
+        .from('leads')
+        .select('atendente_id, status')
+        .not('atendente_id', 'is', null),
+    ]);
+
+    if (!atendentesRes.error && atendentesRes.data) {
+      const leads = leadsRes.data ?? [];
+
+      const a = atendentesRes.data.map((d: Atendente) => {
+        const leadsAtivos = leads.filter(
+          (l) => l.atendente_id === d.id && l.status === 'EM_ATENDIMENTO',
+        ).length;
+        const conversoes = leads.filter(
+          (l) => l.atendente_id === d.id && l.status === 'FECHADO',
+        ).length;
+        return { ...d, leadsAtivos, conversoes, naoLidas: 0 };
+      });
+
       setAtendentes(a);
     }
     setLoading(false);
