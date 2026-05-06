@@ -11,8 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import {
-  Plus, MessageCircle, TrendingUp, Users, ChevronRight, Headphones,
-  Loader2, QrCode, RefreshCw, X, Smartphone
+  Plus, MessageCircle, Users, ChevronRight, Headphones,
+  Loader2, QrCode, X, Smartphone, Power, PowerOff
 } from 'lucide-react';
 
 // Tipagem de tela para conter métricas mockadas auxiliares temporárias
@@ -41,6 +41,7 @@ export default function AtendentesPage() {
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [isGeneratingQr, setIsGeneratingQr] = useState<string | null>(null);
+  const [togglingStatus, setTogglingStatus] = useState<string | null>(null);
 
   // Form
   const [nome, setNome] = useState('');
@@ -79,6 +80,39 @@ export default function AtendentesPage() {
       setAtendentes(a);
     }
     setLoading(false);
+  };
+
+  // Alterna status do atendente entre ONLINE e OFFLINE
+  const handleToggleStatus = async (atendente: AtendenteTela, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const novoStatus = atendente.status === 'ONLINE' ? 'OFFLINE' : 'ONLINE';
+    setTogglingStatus(atendente.id);
+
+    // Atualização otimista — atualiza a UI antes da resposta do Supabase
+    setAtendentes((prev) =>
+      prev.map((a) => (a.id === atendente.id ? { ...a, status: novoStatus } : a))
+    );
+
+    const { error } = await supabase
+      .from('atendentes')
+      .update({ status: novoStatus } as never)
+      .eq('id', atendente.id);
+
+    if (error) {
+      // Reverte em caso de erro
+      setAtendentes((prev) =>
+        prev.map((a) => (a.id === atendente.id ? { ...a, status: atendente.status } : a))
+      );
+      toast.error('Erro ao atualizar status: ' + error.message);
+    } else {
+      toast.success(
+        novoStatus === 'ONLINE'
+          ? `${atendente.nome} ativado com sucesso ✅`
+          : `${atendente.nome} pausado com sucesso ⏸️`
+      );
+    }
+
+    setTogglingStatus(null);
   };
 
   useEffect(() => {
@@ -460,12 +494,43 @@ const handleGerarQR = async (atendente: Atendente) => {
                       </div>
                     </div>
 
-                    <div className="px-5 py-3 bg-muted/30 border-t border-border flex items-center justify-between">
+                    <div className="px-5 py-3 bg-muted/30 border-t border-border flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <MessageCircle className="h-3.5 w-3.5" />
                         <span>Ver painel de rotina</span>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        {/* Toggle ONLINE / OFFLINE */}
+                        <button
+                          onClick={(e) => handleToggleStatus(a, e)}
+                          disabled={togglingStatus === a.id}
+                          title={a.status === 'ONLINE' ? 'Pausar atendente' : 'Ativar atendente'}
+                          className={`
+                            relative inline-flex items-center gap-1.5 px-3 h-7 rounded-full text-xs font-semibold
+                            transition-all duration-300 cursor-pointer select-none
+                            disabled:opacity-60 disabled:cursor-not-allowed
+                            ${
+                              a.status === 'ONLINE'
+                                ? 'bg-green-500/15 text-green-600 hover:bg-red-500/15 hover:text-red-600 border border-green-500/30 hover:border-red-500/30'
+                                : 'bg-muted text-muted-foreground hover:bg-green-500/15 hover:text-green-600 border border-border hover:border-green-500/30'
+                            }
+                          `}
+                        >
+                          {togglingStatus === a.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : a.status === 'ONLINE' ? (
+                            <>
+                              <PowerOff className="h-3 w-3" />
+                              <span>Parar</span>
+                            </>
+                          ) : (
+                            <>
+                              <Power className="h-3 w-3" />
+                              <span>Ativar</span>
+                            </>
+                          )}
+                        </button>
+
                         <Button
                           variant="outline"
                           size="sm"
@@ -478,7 +543,7 @@ const handleGerarQR = async (atendente: Atendente) => {
                           ) : (
                             <QrCode className="h-3 w-3 mr-1" />
                           )}
-                          Gerar QR
+                          QR
                         </Button>
                         <div className="flex items-center gap-1 text-xs text-primary font-medium group-hover:gap-2 transition-all">
                           <ChevronRight className="h-3.5 w-3.5" />
