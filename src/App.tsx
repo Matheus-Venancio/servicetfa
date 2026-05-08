@@ -13,11 +13,9 @@ import ConversasPage from "@/pages/ConversasPage";
 import ClientesPage from "@/pages/ClientesPage";
 import AtendentesPage from "@/pages/AtendentesPage";
 import AtendenteConversasPage from "@/pages/AtendenteConversasPage";
-import DocumentosPage from "@/pages/DocumentosPage";
+import ViagensPage from "@/pages/ViagensPage";
 import GerenciaAcessosPage from "@/pages/GerenciaAcessosPage";
-import AssinaturaPage from "@/pages/AssinaturaPage";
 import NotFound from "./pages/NotFound.tsx";
-
 
 const queryClient = new QueryClient();
 
@@ -47,7 +45,7 @@ const App = () => {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
-            <Route path="/assinatura/:token" element={<AssinaturaPage />} />
+
             <Route path="/" element={<Navigate to="/login" replace />} />
 
             {/* Gestor routes — AppShell as layout */}
@@ -58,7 +56,7 @@ const App = () => {
               <Route path="/gestor/atendentes" element={<AtendentesPage />} />
               <Route path="/gestor/atendentes/:atendenteId/conversas" element={<AtendenteConversasPage />} />
               <Route path="/gestor/clientes" element={<ClientesPage />} />
-              <Route path="/gestor/documentos" element={<DocumentosPage />} />
+              <Route path="/gestor/viagens" element={<ViagensPage />} />
               <Route path="/gestor/acessos" element={<GerenciaAcessosPage />} />
             </Route>
 
