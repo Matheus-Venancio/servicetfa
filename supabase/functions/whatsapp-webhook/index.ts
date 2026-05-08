@@ -104,10 +104,19 @@ Deno.serve(async (req) => {
         return ok({ info: 'ignorado' })
       }
 
-      // Só processa mensagens do SAC
+      // ── Emite Broadcast Realtime para o Frontend ───────────────────────────
+      const channel = supabase.channel(`whatsapp_realtime_${instance}`)
+      await channel.send({
+        type: 'broadcast',
+        event: 'new_message',
+        payload: { instance, remoteJid, messageId }
+      })
+      supabase.removeChannel(channel)
+
+      // Só processa a lógica de Leads (Round-Robin) se for a instância do SAC
       if (instance !== SAC_INSTANCE) {
-        console.log(`[Webhook] Instância ${instance} ignorada — não é o SAC`)
-        return ok({ info: 'instância ignorada' })
+        console.log(`[Webhook] Realtime emitido para ${instance}. Lógica de SAC ignorada.`)
+        return ok({ info: 'realtime emitido, instância ignorada para SAC' })
       }
 
       const telefone = remoteJid

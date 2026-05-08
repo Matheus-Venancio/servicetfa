@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { AvatarInicial } from '@/components/AvatarInicial';
@@ -226,7 +226,7 @@ function chatLabel(chat: EvoChat): string {
 }
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
-const POLL_INTERVAL = 7000;
+const POLL_INTERVAL = 30000; // Alterado para 30s pois agora usamos Realtime
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 export default function AtendenteConversasPage() {
@@ -357,6 +357,10 @@ export default function AtendenteConversasPage() {
   const instanceNameRef = useRef(instanceName);
   useEffect(() => { instanceNameRef.current = instanceName; }, [instanceName]);
 
+  const selectedJidRef = useRef(selectedJid);
+  useEffect(() => { selectedJidRef.current = selectedJid; }, [selectedJid]);
+
+
   // ── 4. Busca mensagens de um chat ─────────────────────────────────────────
   const fetchMessages = useCallback(async (jid: string) => {
     const inst = instanceNameRef.current;
@@ -422,6 +426,37 @@ export default function AtendenteConversasPage() {
     }, POLL_INTERVAL);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [selectedJid, fetchMessages, isPlayingAudio]);
+
+  // ── Supabase Realtime (Webhook Broadcasts) ──────────────────────────────
+  useEffect(() => {
+    if (!instanceName) return;
+
+    const channelName = `whatsapp_realtime_${instanceName}`;
+    const channel = supabase.channel(channelName);
+
+    channel
+      .on('broadcast', { event: 'new_message' }, (payload) => {
+        console.log('[Realtime] Nova mensagem recebida via Broadcast:', payload);
+        
+        // 1. Atualiza a lista de conversas
+        fetchChats(instanceName);
+
+        // 2. Se for na conversa aberta, atualiza as mensagens
+        const rJid = payload.payload?.remoteJid;
+        if (rJid && rJid === selectedJidRef.current) {
+           fetchMessages(rJid);
+        }
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`[Realtime] Inscrito em: ${channelName}`);
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [instanceName, fetchChats, fetchMessages]);
 
   // Auto-scroll
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
