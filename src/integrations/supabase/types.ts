@@ -231,6 +231,38 @@ export interface Database {
         }
         Update: { [key: string]: any }
       }
+      solicitacoes_acesso: {
+        Row: {
+          id: string
+          nome: string
+          email: string
+          telefone: string | null
+          senha: string
+          status: 'PENDENTE' | 'APROVADO' | 'REJEITADO'
+          criado_em: string
+          approval_token: string
+        }
+        Insert: {
+          id?: string
+          nome: string
+          email: string
+          telefone?: string | null
+          senha: string
+          status?: 'PENDENTE' | 'APROVADO' | 'REJEITADO'
+          criado_em?: string
+          approval_token?: string
+        }
+        Update: {
+          id?: string
+          nome?: string
+          email?: string
+          telefone?: string | null
+          senha?: string
+          status?: 'PENDENTE' | 'APROVADO' | 'REJEITADO'
+          criado_em?: string
+          approval_token?: string
+        }
+      }
     }
     Views: Record<string, any>
     Enums: Record<string, any>
@@ -252,6 +284,7 @@ export type Campanha    = Database['public']['Tables']['campanhas']['Row']
 export type FilaConfig  = Database['public']['Tables']['fila_config']['Row']
 export type NotaInterna = Database['public']['Tables']['notas_internas']['Row']
 export type Contrato    = Database['public']['Tables']['contratos']['Row']
+export type SolicitacaoAcesso = Database['public']['Tables']['solicitacoes_acesso']['Row']
 
 export type LeadStatus  = Lead['status']
 export type LeadScore   = Lead['score']

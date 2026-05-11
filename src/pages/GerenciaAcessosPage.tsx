@@ -29,21 +29,43 @@ const GerenciaAcessosPage = () => {
 
   const approveMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { data, error } = await supabase.functions.invoke("approve-user", {
-        body: { solicitacaoId: id },
-      });
+      const { data, error } = await supabase
+        .from("solicitacoes_acesso")
+        .update({ status: "APROVADO" })
+        .eq("id", id)
+        .select()
+        .single();
+
       if (error) throw error;
-      if (data?.error) throw new Error(data.error);
       return data;
     },
     onSuccess: () => {
-
       queryClient.invalidateQueries({ queryKey: ["solicitacoes-pendentes"] });
-      queryClient.invalidateQueries({ queryKey: ["atendentes"] }); // Atualiza lista de gerentes se houver
-      toast.success("Gerente aprovado! O acesso dele já está liberado.");
+      toast.success("Solicitação aprovada!");
     },
     onError: (error: any) => {
-      toast.error("Erro ao aprovar gerente: " + error.message);
+      toast.error("Erro ao aprovar: " + error.message);
+    },
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await supabase
+        .from("solicitacoes_acesso")
+        .update({ status: "REJEITADO" })
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes-pendentes"] });
+      toast.success("Solicitação rejeitada.");
+    },
+    onError: (error: any) => {
+      toast.error("Erro ao rejeitar: " + error.message);
     },
   });
 
@@ -106,6 +128,8 @@ const GerenciaAcessosPage = () => {
                       size="sm"
                       variant="outline"
                       className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                      onClick={() => rejectMutation.mutate(user.id)}
+                      disabled={rejectMutation.isPending || approveMutation.isPending}
                     >
                       <XCircle className="w-4 h-4 mr-1" />
                       Rejeitar
