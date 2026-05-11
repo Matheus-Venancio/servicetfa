@@ -67,23 +67,22 @@ Deno.serve(async (req) => {
 
     // ── GET CHATS (tenta múltiplos endpoints da Evolution API) ────────────────
     if (action === 'get_chats') {
-      const [chatsRes, contactsRes] = await Promise.all([
-        fetch(`${evoUrl}/chat/findChats/${resolvedInstance}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', apikey: evoKey },
-          body: '{}',
-        }),
-        fetch(`${evoUrl}/contact/findContacts/${resolvedInstance}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', apikey: evoKey },
-          body: '{}',
-        }),
-      ]);
+       const [chatsRes, contactsRes] = await Promise.all([
+    fetch(`${evoUrl}/chat/findChats/${resolvedInstance}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: evoKey },
+      body: JSON.stringify({ limit: 100, order: 'DESC' }),
+    }),
+    fetch(`${evoUrl}/contact/findContacts/${resolvedInstance}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: evoKey },
+      body: '{}',
+    }),
+  ]);
 
-      const rawChats = await chatsRes.json().catch(() => []);
-      const rawContacts = await contactsRes.json().catch(() => []);
+  const rawChatsBody = await chatsRes.json().catch(() => []);
+  const rawContacts  = await contactsRes.json().catch(() => []);
 
-      console.log('[Mirror] rawChats[0]:', JSON.stringify(rawChats[0]))
 
       const contactMap: Record<string, string> = {};
       const contactList = Array.isArray(rawContacts) ? rawContacts : (rawContacts?.contacts ?? []);
@@ -91,17 +90,15 @@ Deno.serve(async (req) => {
         if (c.id) contactMap[c.id] = c.pushName || c.notify || c.name || '';
       }
 
-      const chatsRaw = Array.isArray(rawChats) ? rawChats : (rawChats?.chats ?? []);
+       const chatsRaw = Array.isArray(rawChatsBody)
+    ? rawChatsBody
+    : rawChatsBody?.records ?? rawChatsBody?.chats ?? [];
 
+      console.log('[Mirror] rawChats[0]:', JSON.stringify(chatsRaw[0]))
       // Mapeia usando os campos corretos do findChats v2.3.7
       const mapped = chatsRaw.map((c: any) => {
-        const jidOriginal = c.remoteJid ?? null;
-        const jidAlt = c.lastMessage?.key?.remoteJidAlt ?? null;
-        const isLid = jidOriginal?.endsWith('@lid');
-        const isGroup = jidOriginal?.endsWith('@g.us');
-
-        // ← Se for @lid e tiver remoteJidAlt, usa o número real como id
-        const jid = (isLid && jidAlt) ? jidAlt : jidOriginal;
+        const jid = c.remoteJid ?? null;
+        const isGroup = jid?.endsWith('@g.us');
 
         // Nome: pushName do chat, ou da mensagem recebida
         const pushNameChat = c.pushName;
@@ -112,12 +109,11 @@ Deno.serve(async (req) => {
           !pushNameFinal.includes('@');
 
         // Número limpo para deduplicação
-        const phoneNumber = jid?.replace('@s.whatsapp.net', '') ?? null;
+        const phoneNumber = jid?.replace('@s.whatsapp.net', '').replace('@lid', '') ?? null;
 
         return {
-          id: jid,                                          // ← agora usa número real
+          id: jid,                                          
           phoneNumber: isGroup ? null : phoneNumber,
-          isLid: false,                                     // ← já resolvido acima
           contactName: nomeValido ? pushNameFinal : null,
           lastMessage: c.lastMessage,
           unreadCount: c.unreadCount ?? 0,
@@ -125,7 +121,7 @@ Deno.serve(async (req) => {
         };
       }).filter((c: any) => c.id != null && c.id !== '');
 
-      // Deduplica por número — mantém @s.whatsapp.net, descarta @lid duplicado
+      // Deduplica por número — mantém o chat que tiver a mensagem mais recente
       const phoneMap: Record<string, any> = {};
 
       for (const c of mapped) {
@@ -138,17 +134,13 @@ Deno.serve(async (req) => {
         if (!existing) {
           phoneMap[c.phoneNumber] = c;
         } else {
-          // Prefere @s.whatsapp.net sobre @lid
-          const preferCurrent = !c.isLid && existing.isLid;
-          const preferExisting = c.isLid && !existing.isLid;
-          const currentNewer = (c.lastMessage?.messageTimestamp ?? 0) > (existing.lastMessage?.messageTimestamp ?? 0);
+          // Mantém o que tiver o timestamp mais recente
+          const currentTS = c.lastMessage?.messageTimestamp ?? 0;
+          const existingTS = existing.lastMessage?.messageTimestamp ?? 0;
 
-          if (preferCurrent) {
-            phoneMap[c.phoneNumber] = { ...c, contactName: c.contactName || existing.contactName };
-          } else if (!preferExisting && currentNewer) {
+          if (currentTS > existingTS) {
             phoneMap[c.phoneNumber] = { ...c, contactName: c.contactName || existing.contactName };
           } else {
-            // Mantém existing mas pega nome se não tinha
             if (!existing.contactName && c.contactName) {
               phoneMap[c.phoneNumber].contactName = c.contactName;
             }
@@ -163,69 +155,71 @@ Deno.serve(async (req) => {
 
     // ── GET MESSAGES ──────────────────────────────────────────────────────────
     if (action === 'get_messages') {
-      if (!remoteJid) return json({ ok: false, error: 'remoteJid obrigatório' })
+  if (!remoteJid) return json({ ok: false, error: 'remoteJid obrigatório' })
 
-      // Tenta os endpoints conhecidos da Evolution por versão
-      const candidatos = [
-        {
-          method: 'POST',
-          url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
-          // ← estrutura correta que a Evolution v2 aceita
-          reqBody: JSON.stringify({
-            where: { key: { remoteJid } },
-            limit: 60,
-          }),
-        },
-        {
-          method: 'POST',
-          url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
-          reqBody: JSON.stringify({
-            where: { remoteJid },
-            limit: 60,
-          }),
-        },
-        {
-          method: 'POST',
-          url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
-          reqBody: JSON.stringify({ remoteJid, limit: 60 }),
-        },
-      ];
+  const candidatos = [
+    {
+      method: 'POST',
+      url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
+      reqBody: JSON.stringify({ 
+        where: { key: { remoteJid } }, 
+        limit: 100, 
+        order: [['messageTimestamp', 'DESC']] 
+      }),
+    },
+    {
+      method: 'POST',
+      url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
+      reqBody: JSON.stringify({ 
+        where: { remoteJid }, 
+        limit: 100, 
+        order: 'DESC' 
+      }),
+    },
+    {
+      method: 'POST',
+      url: `${evoUrl}/chat/findMessages/${resolvedInstance}`,
+      reqBody: JSON.stringify({ 
+        remoteJid, 
+        limit: 100 
+      }),
+    },
+  ];
 
-      let messages: any[] = []
+  let messages: any[] = []
 
-      for (const c of candidatos) {
-        try {
-          const opts: RequestInit = {
-            method: c.method,
-            headers: { 'Content-Type': 'application/json', apikey: evoKey },
-          }
-          if (c.method === 'POST' && c.reqBody) opts.body = c.reqBody
-
-          const res = await fetch(c.url, opts)
-          const resBody = await res.json().catch(() => ({}))
-          console.log(`[Mirror] get_messages: ${c.method} ${c.url} → ${res.status}`, JSON.stringify(resBody).slice(0, 300))
-
-          if (res.ok) {
-            const raw =
-              resBody?.messages?.records ??
-              resBody?.messages ??
-              resBody?.records ??
-              (Array.isArray(resBody) ? resBody : [])
-
-            // Filtra somente mensagens com key.id válido para evitar key=null no React
-            messages = (Array.isArray(raw) ? raw : []).filter(
-              (m: any) => m?.key != null && m?.key?.id != null
-            )
-            break
-          }
-        } catch (e) {
-          console.error('[Mirror] candidato erro:', e)
-        }
+  for (const c of candidatos) {
+    try {
+      const opts: RequestInit = {
+        method: c.method,
+        headers: { 'Content-Type': 'application/json', apikey: evoKey },
       }
+      if (c.method === 'POST' && c.reqBody) opts.body = c.reqBody
 
-      return json({ ok: true, messages })
+      const res  = await fetch(c.url, opts)
+      const resBody = await res.json().catch(() => ({}))
+      console.log(`[Mirror] get_messages: ${c.method} ${c.url} → ${res.status}`)
+
+      if (res.ok) {
+        // Suporta { records: [] }, { messages: { records: [] } }, [], { messages: [] }
+        const raw =
+          resBody?.records ??
+          resBody?.messages?.records ??
+          resBody?.messages ??
+          (Array.isArray(resBody) ? resBody : [])
+
+        messages = (Array.isArray(raw) ? raw : []).filter(
+          (m: any) => m?.key != null && m?.key?.id != null
+        )
+        break
+      }
+    } catch (e) {
+      console.error('[Mirror] candidato erro:', e)
     }
+  }
 
+  return json({ ok: true, messages })
+}
     // ── SEND MESSAGE ──────────────────────────────────────────────────────────
     if (action === 'send_message') {
       if (!numero || !message) return json({ ok: false, error: 'numero e message obrigatórios' })
@@ -338,8 +332,8 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'get_media') {
-      const { messageId, mediaType } = body;
-      if (!messageId) return json({ ok: false, error: 'messageId obrigatório' });
+      const { message, mediaType } = body;
+      if (!message) return json({ ok: false, error: 'message (objeto Baileys) obrigatório' });
 
       const isAudio = mediaType === 'audioMessage';
 
@@ -347,8 +341,8 @@ Deno.serve(async (req) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: evoKey },
         body: JSON.stringify({
-          message: { key: { id: messageId } },
-          convertToMp4: isAudio, // ← converte áudio para mp4/aac que o browser suporta
+          message, // ← passa o objeto completo (key + message content)
+          convertToMp4: isAudio,
         }),
       });
 

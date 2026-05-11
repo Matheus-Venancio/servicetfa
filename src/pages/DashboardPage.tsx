@@ -79,7 +79,7 @@ export default function DashboardPage() {
           label: 'Fechados hoje',
           value: m.leadsFechados,
           icon: CheckCircle,
-          sub: `${m.contratosAssinados} contratos assinados`,
+          sub: `${m.viagensAgendadas} viagens agendadas`,
           color: 'text-green-500',
           bg: 'bg-green-500/10',
         },
@@ -155,7 +155,7 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
             <Card className="p-5 col-span-1">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-muted-foreground font-medium">Receita (contratos)</span>
+                <span className="text-sm text-muted-foreground font-medium">Receita (viagens)</span>
                 <div className="h-8 w-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
                   <DollarSign className="h-4 w-4 text-emerald-500" />
                 </div>
@@ -163,33 +163,33 @@ export default function DashboardPage() {
               <span className="font-mono text-2xl font-bold text-foreground">
                 {formatBRL(m.receitaTotal)}
               </span>
-              <p className="text-xs text-muted-foreground mt-1.5">Assinados + Faturados</p>
+              <p className="text-xs text-muted-foreground mt-1.5">Agendadas + Concluídas</p>
             </Card>
 
             <Card className="p-5 col-span-1">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-muted-foreground font-medium">Contratos assinados</span>
+                <span className="text-sm text-muted-foreground font-medium">Viagens agendadas</span>
                 <div className="h-8 w-8 rounded-lg bg-green-500/10 flex items-center justify-center">
                   <FileCheck className="h-4 w-4 text-green-500" />
                 </div>
               </div>
               <span className="font-mono text-3xl font-bold text-foreground">
-                {m.contratosAssinados}
+                {m.viagensAgendadas}
               </span>
-              <p className="text-xs text-muted-foreground mt-1.5">Assinados / faturados</p>
+              <p className="text-xs text-muted-foreground mt-1.5">Agendadas para o futuro</p>
             </Card>
 
             <Card className="p-5 col-span-1">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-muted-foreground font-medium">Aguardando assinatura</span>
+                <span className="text-sm text-muted-foreground font-medium">Viagens concluídas</span>
                 <div className="h-8 w-8 rounded-lg bg-orange-500/10 flex items-center justify-center">
                   <FileClock className="h-4 w-4 text-orange-500" />
                 </div>
               </div>
               <span className="font-mono text-3xl font-bold text-foreground">
-                {m.contratosPendentes}
+                {m.viagensConcluidas}
               </span>
-              <p className="text-xs text-muted-foreground mt-1.5">Gerados / enviados</p>
+              <p className="text-xs text-muted-foreground mt-1.5">Viagens já finalizadas</p>
             </Card>
           </div>
 

@@ -43,8 +43,7 @@ const NAV_GESTOR: NavSection[] = [
       { icon: Users, label: 'Atendentes', path: '/gestor/atendentes' },
       { icon: Shield, label: 'Gestão de Acesso', path: '/gestor/acessos' },
       { icon: Smartphone, label: 'Viagens', path: '/gestor/viagens' },
-      { icon: MessageCircle, label: 'Clientes', path: '/gestor/clientes' },
-      { icon: TrendingUp, label: 'Relatórios', path: '#', disabled: true },
+      { icon: MessageCircle, label: 'Clientes', path: '/gestor/clientes' }
     ],
   },
 ];

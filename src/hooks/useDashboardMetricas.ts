@@ -32,10 +32,10 @@ export interface DashboardMetricas {
   // Leads por score
   leadsPorScore: { quente: number; morno: number; frio: number }
 
-  // Receita (contratos)
+  // Receita (viagens)
   receitaTotal: number
-  contratosAssinados: number
-  contratosPendentes: number
+  viagensAgendadas: number
+  viagensConcluidas: number
 
   // Canal de origem
   leadsPorCanal: { canal: string; total: number }[]
@@ -85,7 +85,7 @@ export function useDashboardMetricas() {
         leadsResult,
         leadsSemanaResult,
         atendentesResult,
-        contratosResult,
+        viagensResult,
       ] = await Promise.all([
         // 1. Todos os leads (status + score + canal + atendente_id)
         supabase
@@ -104,10 +104,10 @@ export function useDashboardMetricas() {
           .select('id, nome, email, status, max_leads')
           .eq('papel', 'ATENDENTE'),
 
-        // 4. Contratos para métricas financeiras
+        // 4. Viagens para métricas financeiras
         supabase
-          .from('contratos')
-          .select('id, status, valor'),
+          .from('viagens')
+          .select('id, status, valor_investimento'),
       ])
 
       // ── Processar leads ──────────────────────────────────────────────────────
@@ -209,15 +209,15 @@ export function useDashboardMetricas() {
         }
       })
 
-      // ── Contratos ────────────────────────────────────────────────────────────
-      const contratos = (contratosResult.data ?? []) as { id: string; status: string; valor: number | null }[]
+      // ── Viagens ─────────────────────────────────────────────────────────────
+      const viagens = (viagensResult.data ?? []) as { id: string; status: string; valor_investimento: number | null }[]
 
-      const receitaTotal = contratos
-        .filter((c) => c.status === 'FATURADO' || c.status === 'ASSINADO')
-        .reduce((acc, c) => acc + (c.valor ?? 0), 0)
+      const receitaTotal = viagens
+        .filter((v) => v.status === 'CONCLUIDA' || v.status === 'AGENDADA')
+        .reduce((acc, v) => acc + (v.valor_investimento ?? 0), 0)
 
-      const contratosAssinados = contratos.filter((c) => c.status === 'ASSINADO' || c.status === 'FATURADO').length
-      const contratosPendentes = contratos.filter((c) => c.status === 'GERADO' || c.status === 'ENVIADO').length
+      const viagensAgendadas = viagens.filter((v) => v.status === 'AGENDADA').length
+      const viagensConcluidas = viagens.filter((v) => v.status === 'CONCLUIDA').length
 
       // ── Montar objeto final ──────────────────────────────────────────────────
       setMetricas({
@@ -229,8 +229,8 @@ export function useDashboardMetricas() {
         qualificando,
         leadsPorScore: { quente, morno, frio },
         receitaTotal,
-        contratosAssinados,
-        contratosPendentes,
+        viagensAgendadas,
+        viagensConcluidas,
         leadsPorCanal,
         evolucaoSemanal,
         atendentes: metricasAtendentes,
@@ -254,7 +254,7 @@ export function useDashboardMetricas() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => {
         carregar()
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contratos' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'viagens' }, () => {
         carregar()
       })
       .subscribe()

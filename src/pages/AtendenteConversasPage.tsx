@@ -61,14 +61,16 @@ interface Channel {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function extrairTexto(msg?: EvoMessage['message']): string {
+function extrairTexto(msg?: any): string {
   if (!msg) return '[Mídia]';
-  if (msg.imageMessage) return msg.imageMessage.caption || '📷 Imagem';
-  if (msg.documentMessage) return `📄 ${msg.documentMessage.fileName || 'Documento'}`;
-  if (msg.videoMessage) return msg.videoMessage.caption || '🎥 Vídeo';
-  if (msg.audioMessage) return '🎵 Áudio';
-  if (msg.stickerMessage) return '[Figurinha]';
-  return msg.conversation || msg.extendedTextMessage?.text || '[Mídia]';
+  const m = msg.viewOnceMessageV2?.message || msg.viewOnceMessage?.message || msg.ephemeralMessage?.message || msg;
+  if (m.imageMessage) return m.imageMessage.caption || '📷 Imagem';
+  if (m.documentMessage) return `📄 ${m.documentMessage.fileName || 'Documento'}`;
+  if (m.videoMessage) return m.videoMessage.caption || '🎥 Vídeo';
+  if (m.audioMessage) return '🎵 Áudio';
+  if (m.stickerMessage) return '[Figurinha]';
+  if (m.reactionMessage) return `Reagiu: ${m.reactionMessage.text}`;
+  return m.conversation || m.extendedTextMessage?.text || '[Mídia]';
 }
 
 // ← FORA do AtendenteConversasPage, antes da declaração do componente
@@ -76,7 +78,7 @@ function extrairTexto(msg?: EvoMessage['message']): string {
 
 interface MsgMediaProps {
   msg: EvoMessage;
-  getMediaUrl: (id: string, mediaType?: string) => Promise<string | null>;
+  getMediaUrl: (msg: EvoMessage, mediaType?: string) => Promise<string | null>;
   onAudioPlay: () => void;
   onAudioStop: () => void;
 }
@@ -84,17 +86,30 @@ interface MsgMediaProps {
 function MsgMedia({ msg, getMediaUrl, onAudioPlay, onAudioStop }: MsgMediaProps) {
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const m = msg.message;
+  
+  const m = msg.message?.viewOnceMessageV2?.message 
+         || msg.message?.viewOnceMessage?.message 
+         || msg.message?.ephemeralMessage?.message 
+         || msg.message;
 
   const load = async (mediaType?: string) => {
     if (mediaUrl || loading) return;
     setLoading(true);
-    const url = await getMediaUrl(msg.key.id, mediaType);
+    const url = await getMediaUrl(msg, mediaType);
     setMediaUrl(url);
     setLoading(false);
   };
 
   if (!m) return <span className="text-sm italic text-[#8696a0]">[Mídia]</span>;
+
+  if (m.reactionMessage) {
+    return (
+      <div className="flex items-center gap-1 opacity-70 bg-black/5 rounded-full px-2 py-0.5">
+        <span className="text-[10px] uppercase font-bold">Reagiu:</span>
+        <span className="text-lg">{m.reactionMessage.text}</span>
+      </div>
+    );
+  }
 
   if (m.imageMessage) {
     const thumb = m.imageMessage.jpegThumbnail
@@ -216,7 +231,7 @@ function formatarData(ts?: number): string {
 
 function phoneLabel(jid: string | null | undefined): string {
   if (!jid) return 'Desconhecido';
-  return jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+  return jid.replace('@s.whatsapp.net', '').replace('@g.us', '').replace('@lid', '');
 }
 
 function chatLabel(chat: EvoChat): string {
@@ -417,15 +432,18 @@ export default function AtendenteConversasPage() {
   }, [callMirror]); // ← remove instanceName das deps, usa ref
 
   // Polling de mensagens
-  useEffect(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    if (!selectedJid) return;
-    fetchMessages(selectedJid);
-    pollRef.current = setInterval(() => {
-      if (!isPlayingAudio) fetchMessages(selectedJid); // ← não atualiza se estiver ouvindo
-    }, POLL_INTERVAL);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [selectedJid, fetchMessages, isPlayingAudio]);
+useEffect(() => {
+  if (pollRef.current) clearInterval(pollRef.current);
+  if (!selectedJid) return;
+  fetchMessages(selectedJid);
+  pollRef.current = setInterval(() => {
+    if (!isPlayingAudio) {
+      fetchMessages(selectedJid);
+      fetchChats(); // ← garante lista lateral atualizada
+    }
+  }, POLL_INTERVAL);
+  return () => { if (pollRef.current) clearInterval(pollRef.current); };
+}, [selectedJid, fetchMessages, fetchChats, isPlayingAudio]);
 
   // ── Supabase Realtime (Webhook Broadcasts) ──────────────────────────────
   useEffect(() => {
@@ -596,14 +614,15 @@ export default function AtendenteConversasPage() {
     e.target.value = '';
   };
 
-  const getMediaUrl = useCallback(async (messageId: string, mediaType?: string): Promise<string | null> => {
+  const getMediaUrl = useCallback(async (msg: EvoMessage, mediaType?: string): Promise<string | null> => {
+    const messageId = msg.key.id;
     if (mediaCache.current[messageId]) return mediaCache.current[messageId];
     try {
       const data = await callMirror({
         action: 'get_media',
         instanceName: instanceNameRef.current,
-        messageId,
-        mediaType, // ← passa o tipo para a edge function saber se converte
+        message: msg, // ← envia o objeto completo da mensagem
+        mediaType,
       });
       if (!data?.base64) return null;
 
